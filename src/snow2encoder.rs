@@ -1,7 +1,10 @@
 use chai::data::{元素, 元素映射, 可编码对象, 数据, 编码信息};
 use chai::encoders::编码器;
 use chai::错误;
+use std::collections::HashMap;
 use std::iter::zip;
+
+use crate::dual::构建双编码映射;
 
 pub struct 冰雪双拼编码器 {
     pub 进制: u64,
@@ -10,6 +13,7 @@ pub struct 冰雪双拼编码器 {
     pub 全码空间: Vec<u8>,
     pub 简码空间: Vec<u8>,
     pub 包含元素的词映射: Vec<Vec<usize>>,
+    pub 双编码映射: HashMap<元素, (元素, 元素)>,
 }
 
 impl 冰雪双拼编码器 {
@@ -26,15 +30,17 @@ impl 冰雪双拼编码器 {
                 包含元素的词映射[*元素].push(索引);
             }
         }
-        let encoder = Self {
+        let 双编码映射 = 构建双编码映射(数据);
+        let 编码器 = Self {
             进制: 数据.进制,
             编码结果: 编码输出,
             词列表,
             全码空间,
             简码空间,
             包含元素的词映射,
+            双编码映射,
         };
-        Ok(encoder)
+        Ok(编码器)
     }
 
     pub fn 重置空间(&mut self) {
@@ -49,9 +55,10 @@ impl 冰雪双拼编码器 {
     #[inline(always)]
     fn 全码规则(词: &可编码对象, 映射: &元素映射, 进制: u64) -> u64 {
         let 元素序列 = &词.元素序列;
-        let mut 全码 = (映射[元素序列[0]] * 进制 + 映射[元素序列[1]]) * 进制 + 映射[元素序列[2]];
+        let mut 全码 =
+            映射[元素序列[0]] + 映射[元素序列[1]] * 进制 + 映射[元素序列[2]] * (进制 * 进制);
         if 元素序列.len() >= 4 {
-            全码 = 全码 * 进制 + 映射[元素序列[3]];
+            全码 += 映射[元素序列[3]] * (进制 * 进制 * 进制);
         }
         全码
     }
