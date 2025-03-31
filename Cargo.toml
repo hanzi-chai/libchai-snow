@@ -1,12 +1,12 @@
 [package]
-name = "libchai-snow"
+name = "snow"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 clap = "4.5.32"
 itertools = "0.14.0"
-libchai = { version = "0.2.2", path = "../libchai" }
+libchai = "0.2.4"
 rand = "0.8.5"
 rustc-hash = "2.1.1"
 serde = "1.0.219"

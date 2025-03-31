@@ -4,7 +4,7 @@ use chai::objectives::目标函数;
 use chai::optimizers::{优化方法, 优化问题};
 use chai::{命令, 命令行, 命令行参数, 错误};
 use clap::Parser;
-use libchai_snow::{冰雪双拼操作, 冰雪双拼目标函数, 冰雪双拼编码器};
+use snow::{冰雪双拼操作, 冰雪双拼目标函数, 冰雪双拼编码器};
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;
@@ -46,8 +46,15 @@ fn main() -> Result<(), 错误> {
             优化结果列表.sort_by(|a, b| a.1.分数.partial_cmp(&b.1.分数).unwrap());
             let mut 总结文件 = File::create(命令行.输出目录.join("总结.txt"))?;
             for (线程序号, 优化结果) in 优化结果列表 {
-                print!("线程 {} 结果：{}", 线程序号, 优化结果.指标);
-                write!(总结文件, "线程 {} 结果：{}", 线程序号, 优化结果.指标)?;
+                print!(
+                    "线程 {} 分数：{:.4}；{}",
+                    线程序号, 优化结果.分数, 优化结果.指标
+                );
+                write!(
+                    总结文件,
+                    "线程 {} 分数：{:.4}；{}",
+                    线程序号, 优化结果.分数, 优化结果.指标
+                )?;
             }
         }
     }
