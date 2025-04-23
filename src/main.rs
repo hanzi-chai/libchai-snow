@@ -4,7 +4,9 @@ use chai::objectives::目标函数;
 use chai::optimizers::{优化方法, 优化问题};
 use chai::{命令, 命令行, 命令行参数, 错误};
 use clap::Parser;
-use snow::{冰雪双拼操作, 冰雪双拼目标函数, 冰雪双拼编码器};
+use snow::snow2objective::冰雪双拼目标函数;
+use snow::snow2operators::冰雪双拼操作;
+use snow::冰雪双拼编码器;
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;
@@ -12,7 +14,8 @@ use std::thread::spawn;
 fn main() -> Result<(), 错误> {
     let 参数 = 命令行参数::parse();
     let 命令行 = 命令行::新建(参数, None);
-    let 数据 = 命令行.准备数据();
+    let mut 数据 = 命令行.准备数据();
+    数据.词列表.sort_by_key(|词| 词.词长);
     let _config = 数据.配置.clone();
     match 命令行.参数.command {
         命令::Encode => {
