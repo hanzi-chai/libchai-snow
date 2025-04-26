@@ -16,6 +16,11 @@ fn main() -> Result<(), 错误> {
     let 命令行 = 命令行::新建(参数, None);
     let mut 数据 = 命令行.准备数据();
     数据.词列表.sort_by_key(|词| 词.词长);
+    数据.词列表.iter_mut().for_each(|词| {
+        if 词.词长 == 1 {
+            词.词长 = 0;
+        }
+    });
     let _config = 数据.配置.clone();
     match 命令行.参数.command {
         命令::Encode => {
@@ -38,8 +43,15 @@ fn main() -> Result<(), 错误> {
                 let 操作 = 冰雪双拼操作::新建(&数据);
                 let mut 问题 = 优化问题::新建(数据.clone(), 编码器, 目标函数, 操作);
                 let 优化方法 = 退火.clone();
+                let 数据 = 数据.clone();
                 let 子命令行 = 命令行.生成子命令行(线程序号);
-                let 线程 = spawn(move || 优化方法.优化(&mut 问题, &子命令行));
+                let 线程 = spawn(move || {
+                    let 优化结果 = 优化方法.优化(&mut 问题, &子命令行);
+                    let 编码结果 = 问题.编码器.编码(&优化结果.映射, &None);
+                    let 码表 = 数据.生成码表(&编码结果);
+                    子命令行.输出编码结果(码表);
+                    return 优化结果;
+                });
                 线程池.push(线程);
             }
             let mut 优化结果列表 = vec![];

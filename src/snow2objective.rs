@@ -46,8 +46,21 @@ impl 目标函数 for 冰雪双拼目标函数 {
     fn 计算(
         &mut self, 编码结果: &mut [编码信息], 映射: &元素映射
     ) -> (Self::目标值, f64) {
-        let (默认指标, 默认损失函数) = self.默认目标函数.计算(编码结果, 映射);
+        let (mut 默认指标, 默认损失函数) = self.默认目标函数.计算(编码结果, 映射);
         let mut 乱序声母数 = 0;
+        let mut 总频率 = 0;
+        let mut 多字频率 = 0;
+        for 编码信息 in 编码结果 {
+            if 编码信息.词长 != 0 {
+                多字频率 += 编码信息.频率;
+            }
+            总频率 += 编码信息.频率;
+        }
+        if let Some(words_full) = &mut 默认指标.words_full {
+            if let Some(duplication) = words_full.duplication {
+                words_full.duplication = Some(duplication * (总频率 as f64 / 多字频率 as f64));
+            }
+        }
         for 声母 in &self.元素分类.声母列表 {
             if let Some(键位列表) = self.正则化.get(声母) {
                 let 键盘键位 = 键位列表[0].0;
@@ -70,7 +83,7 @@ impl 目标函数 for 冰雪双拼目标函数 {
                 韵母组数 += 1;
             }
         }
-        let 损失函数 = 默认损失函数 + 韵母组数 as f64 * 0.0001;
+        let 损失函数 = 默认损失函数 + 韵母组数 as f64 * 0.00005;
         return (
             冰雪双拼指标 {
                 默认指标,

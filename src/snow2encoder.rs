@@ -2,7 +2,7 @@ use crate::dual::构建双编码映射;
 use chai::data::{元素, 元素映射, 可编码对象, 数据, 编码信息, 键};
 use chai::encoders::编码器;
 use chai::错误;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::iter::zip;
 
@@ -13,7 +13,6 @@ pub struct 冰雪双拼编码器 {
     pub 编码结果: Vec<编码信息>,
     pub 词列表: Vec<可编码对象>,
     pub 全码空间: Vec<u8>,
-    pub 简码空间: Vec<u8>,
     pub 包含元素的词映射: Vec<Vec<usize>>,
     pub 数字转元素: FxHashMap<元素, String>,
 }
@@ -25,7 +24,6 @@ impl 冰雪双拼编码器 {
         let 编码输出 = 词列表.iter().map(编码信息::new).collect();
         let 编码空间大小 = 数据.进制.pow(最大码长 as u32) as usize;
         let 全码空间 = vec![u8::default(); 编码空间大小];
-        let 简码空间 = 全码空间.clone();
         let mut 包含元素的词映射 = vec![vec![]; 数据.初始映射.len()];
         for (索引, 词) in 词列表.iter().enumerate() {
             for 元素 in &词.元素序列 {
@@ -37,7 +35,6 @@ impl 冰雪双拼编码器 {
             编码结果: 编码输出,
             词列表,
             全码空间,
-            简码空间,
             包含元素的词映射,
             数字转元素: 数据.数字转元素.clone(),
         };
@@ -48,15 +45,12 @@ impl 冰雪双拼编码器 {
         self.全码空间.iter_mut().for_each(|x| {
             *x = 0;
         });
-        self.简码空间.iter_mut().for_each(|x| {
-            *x = 0;
-        });
     }
 
     #[inline(always)]
     fn 全码规则(词: &可编码对象, 映射: &元素映射, 进制: u64) -> u64 {
         let 元素序列 = &词.元素序列;
-        if 词.词长 == 1 {
+        if 词.词长 == 0 {
             映射[元素序列[0]] + 映射[元素序列[1]] * 进制
         } else {
             映射[元素序列[0]]
@@ -89,86 +83,13 @@ impl 冰雪双拼编码器 {
 
         for 编码信息 in 编码结果.iter_mut() {
             let 全码信息 = &mut 编码信息.全码;
-            if 编码信息.词长 == 1 {
-                全码信息.写入(全码信息.原始编码, false);
+            if 编码信息.词长 == 0 {
+                全码信息.更新(全码信息.原始编码, false);
             } else {
                 全码信息.原始编码候选位置 = self.全码空间[全码信息.原始编码 as usize];
                 self.全码空间[全码信息.原始编码 as usize] += 1;
-                全码信息.写入(全码信息.原始编码, 全码信息.原始编码候选位置 > 0);
+                全码信息.更新(全码信息.原始编码, 全码信息.原始编码候选位置 > 0);
             }
-        }
-    }
-
-    fn _输出简码(&mut self) {
-        let 编码结果 = &mut self.编码结果;
-        let 进制 = self.进制 as usize;
-        for 编码信息 in 编码结果.iter_mut() {
-            if 编码信息.词长 > 1 {
-                break;
-            }
-            let 全码 = 编码信息.全码.实际编码 as usize;
-            let mut 简码 = 全码;
-            let 一简 = 全码 % 进制 + 空格 as usize * 进制;
-            if self.简码空间[一简] == 0 {
-                简码 = 一简;
-                self.简码空间[一简] += 1;
-            } else {
-                let 二简 = 全码 % (进制 * 进制);
-                if self.简码空间[二简] == 0 {
-                    简码 = 二简;
-                    self.简码空间[二简] += 1;
-                }
-            }
-            编码信息.简码.写入(简码 as u64, false);
-        }
-    }
-
-    fn _输出规则简码(&mut self) {
-        let 编码结果 = &mut self.编码结果;
-        let 进制 = self.进制 as usize;
-        let 首次输出简码数量 = 800; // 首次输出简码的数量限制
-        // 首先出高频的一简和二简，如果没有则标记为 0
-        let mut 已输出 = FxHashSet::default();
-        for (序号, 编码信息) in 编码结果.iter_mut().enumerate() {
-            let 全码 = 编码信息.全码.实际编码 as usize;
-            let 简码信息 = &mut 编码信息.简码;
-            if 序号 == 首次输出简码数量 {
-                break;
-            }
-            let mut 简码 = 0;
-            let 一简 = 全码 % 进制 + 空格 as usize * 进制;
-            if self.简码空间[一简] == 0 {
-                简码 = 一简;
-                self.简码空间[一简] += 1;
-            } else {
-                let 二简 = 全码 % (进制 * 进制);
-                if self.简码空间[二简] == 0 {
-                    简码 = 二简;
-                    self.简码空间[二简] += 1;
-                }
-            }
-            if 简码 > 0 {
-                简码信息.写入(简码 as u64, false);
-                已输出.insert(序号);
-            }
-        }
-        for (序号, 编码信息) in 编码结果.iter_mut().enumerate() {
-            if 编码信息.词长 > 1 {
-                break;
-            }
-            if 已输出.contains(&序号) {
-                continue; // 已经输出过简码了
-            }
-            let 全码 = 编码信息.全码.实际编码 as usize;
-            let 简码信息 = &mut 编码信息.简码;
-            // 二简
-            let mut 简码 = 全码;
-            let 二简 = 全码 % (进制 * 进制);
-            if self.简码空间[二简] == 0 {
-                简码 = 二简;
-                self.简码空间[二简] += 1;
-            }
-            简码信息.写入(简码 as u64, false);
         }
     }
 }
@@ -181,14 +102,6 @@ impl 编码器 for 冰雪双拼编码器 {
     ) -> &mut Vec<编码信息> {
         self.重置空间();
         self.输出全码(映射, 移动的元素);
-        // self.输出简码();
-        // 如果需要输出实际的编码信息，取消注释以下代码
-        // for 编码信息 in &mut self.编码结果 {
-        //     编码信息.全码.原始编码 = 编码信息.全码.实际编码;
-        //     编码信息.全码.原始编码候选位置 = 编码信息.全码.选重标记 as u8;
-        //     编码信息.简码.原始编码 = 编码信息.简码.实际编码;
-        //     编码信息.简码.原始编码候选位置 = 编码信息.简码.选重标记 as u8;
-        // }
         &mut self.编码结果
     }
 }
