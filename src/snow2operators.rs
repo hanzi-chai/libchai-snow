@@ -21,7 +21,6 @@ const 大集合大小: usize = 18;
 pub struct 冰雪双拼操作 {
     元素分类: 冰雪双拼元素分类,
     键转数字: FxHashMap<char, u64>,
-    数字转元素: FxHashMap<元素, String>,
 }
 
 impl 变异 for 冰雪双拼操作 {
@@ -49,7 +48,6 @@ impl 冰雪双拼操作 {
         Self {
             元素分类,
             键转数字: 数据.键转数字.clone(),
-            数字转元素: 数据.数字转元素.clone(),
         }
     }
 
