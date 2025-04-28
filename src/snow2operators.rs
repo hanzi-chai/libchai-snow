@@ -14,13 +14,14 @@ use std::collections::{HashMap, HashSet};
 
 const 全集合: &str = "qazwsxedcrfvtgbyhnujmik,ol.p;/";
 const 大集合大小: usize = 18;
-// const 可变声母: [&str; 13] = [
-//     "b", "p", "m", "f", "d", "t", "n", "l", "r", "零开", "零合", "零齐", "零撮",
-// ];
+const 可变声母: [&str; 10] = [
+    "b", "p", "m", "f", "t", "n", "l", "r", "零开", "零合",
+];
 
 pub struct 冰雪双拼操作 {
     元素分类: 冰雪双拼元素分类,
     键转数字: FxHashMap<char, u64>,
+    数字转元素: FxHashMap<元素, String>,
 }
 
 impl 变异 for 冰雪双拼操作 {
@@ -32,12 +33,8 @@ impl 变异 for 冰雪双拼操作 {
             self.随机交换声母(映射)
         } else if 随机数 < 0.7 {
             self.随机移动韵部(映射)
-        } else { //if 随机数 < 0.9 {
+        } else {
             self.随机交换韵部(映射)
-        // } else if 随机数 < 0.95 {
-        //     self.随机移动声调(映射)
-        // } else {
-        //     self.随机交换声调(映射)
         }
     }
 }
@@ -48,6 +45,7 @@ impl 冰雪双拼操作 {
         Self {
             元素分类,
             键转数字: 数据.键转数字.clone(),
+            数字转元素: 数据.数字转元素.clone(),
         }
     }
 
@@ -62,10 +60,10 @@ impl 冰雪双拼操作 {
         for 声母列表 in 声母逆映射.values() {
             if 声母列表.len() > 1 {
                 for 声母 in 声母列表 {
-                    // let 声母名 = self.数字转元素[声母][7..].to_string();
-                    // if 可变声母.contains(&声母名.as_str()) {
+                    let 声母名 = self.数字转元素[声母][7..].to_string();
+                    if 可变声母.contains(&声母名.as_str()) {
                     可移动声母.push(*声母);
-                    // }
+                    }
                 }
             }
         }
@@ -77,18 +75,18 @@ impl 冰雪双拼操作 {
 
     pub fn 随机交换声母(&self, 映射: &mut 元素映射) -> Vec<元素> {
         let mut rng = thread_rng();
-        // let 可变声母列表: Vec<_> = self
-        //     .元素分类
-        //     .声母列表
-        //     .iter()
-        //     .filter(|x| {
-        //         let 声母名 = self.数字转元素[*x][7..].to_string();
-        //         可变声母.contains(&声母名.as_str())
-        //     })
-        //     .cloned()
-        //     .collect();
-        let 声母一 = *self.元素分类.声母列表.choose(&mut rng).unwrap();
-        let 声母二 = *self.元素分类.声母列表.choose(&mut rng).unwrap();
+        let 可变声母列表: Vec<_> = self
+            .元素分类
+            .声母列表
+            .iter()
+            .filter(|x| {
+                let 声母名 = self.数字转元素[*x][7..].to_string();
+                可变声母.contains(&声母名.as_str())
+            })
+            .cloned()
+            .collect();
+        let 声母一 = *可变声母列表.choose(&mut rng).unwrap();
+        let 声母二 = *可变声母列表.choose(&mut rng).unwrap();
         let 键一 = 映射[声母一];
         let 键二 = 映射[声母二];
         映射[声母一] = 键二;
