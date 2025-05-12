@@ -3,9 +3,9 @@ use chai::optimizers::simulated_annealing::降温时间表;
 use chai::optimizers::{优化方法, 优化问题};
 use chai::{命令行, 命令行参数, 错误};
 use clap::Parser;
-use snow::snow2objective::冰雪双拼目标函数;
-use snow::snow2operators::冰雪双拼操作;
-use snow::冰雪双拼编码器;
+use snow::snow2objective::冰雪二拼目标函数;
+use snow::snow2operators::冰雪二拼操作;
+use snow::冰雪二拼编码器;
 use std::fs::File;
 use std::io::Write;
 use std::thread::{sleep, spawn};
@@ -44,9 +44,9 @@ fn main() -> Result<(), 错误> {
     let mut 线程池 = vec![];
     let 总线程数 = 9;
     for 线程序号 in 0..总线程数 {
-        let 编码器 = 冰雪双拼编码器::新建(&数据)?;
-        let 目标函数 = 冰雪双拼目标函数::新建(&数据)?;
-        let 操作 = 冰雪双拼操作::新建(&数据);
+        let 编码器 = 冰雪二拼编码器::新建(&数据)?;
+        let 目标函数 = 冰雪二拼目标函数::新建(&数据)?;
+        let 操作 = 冰雪二拼操作::新建(&数据);
         let mut 问题 = 优化问题::新建(数据.clone(), 编码器, 目标函数, 操作);
         let 优化方法 = 退火.clone();
         let 子命令行 = 命令行.生成子命令行(线程序号);

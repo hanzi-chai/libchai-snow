@@ -1,10 +1,10 @@
-//! 冰雪双拼的优化问题。
+//! 冰雪二拼的优化问题。
 //!
 
 use crate::dual::构建双编码映射;
 use crate::snow2encoder::空格;
 use crate::tree::字根树控制器;
-use crate::{冰雪双拼元素分类, 固定字根};
+use crate::冰雪二拼元素分类;
 use chai::data::{元素, 元素映射, 数据};
 use chai::operators::变异;
 use rand::seq::{IteratorRandom, SliceRandom};
@@ -13,39 +13,62 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{HashMap, HashSet};
 
 const 全集合: &str = "qazwsxedcrfvtgbyhnujmik,ol.p;/";
+const 小集合: &str = "azxcrtyu;/";
 const 大集合大小: usize = 18;
-const 可变声母: [&str; 10] = [
-    "b", "p", "m", "f", "t", "n", "l", "r", "零开", "零合",
+const 固定声母: [&str; 24] = [
+    "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "zh", "ch", "sh", "r",
+    "z", "c", "s", "零齐", "零开", "零合",
+];
+const 固定字根: [&str; 0] = [
+    // "1", "2", "3", "4", "5", "二", "三", "四", "五", "六", "七", "八", "九", "十",
 ];
 
-pub struct 冰雪双拼操作 {
-    元素分类: 冰雪双拼元素分类,
+pub struct 冰雪二拼操作 {
+    元素分类: 冰雪二拼元素分类,
+    字根树控制器: 字根树控制器,
     键转数字: FxHashMap<char, u64>,
     数字转元素: FxHashMap<元素, String>,
+    双编码映射: HashMap<元素, (元素, 元素)>,
+    固定字根: HashSet<元素>,
 }
 
-impl 变异 for 冰雪双拼操作 {
+#[derive(PartialEq)]
+pub enum 策略 {
+    产生,
+    湮灭,
+    移动,
+}
+
+impl 变异 for 冰雪二拼操作 {
     fn 变异(&mut self, 映射: &mut 元素映射) -> Vec<元素> {
         let 随机数: f64 = random();
-        if 随机数 < 0.2 {
+        if 随机数 < 0.05 {
             self.随机移动声母(映射)
-        } else if 随机数 < 0.3 {
+        } else if 随机数 < 0.1 {
             self.随机交换声母(映射)
-        } else if 随机数 < 0.7 {
+        } else if 随机数 < 0.2 {
             self.随机移动韵部(映射)
-        } else {
+        } else if 随机数 < 0.3 {
             self.随机交换韵部(映射)
+        } else if 随机数 < 0.7 {
+            self.随机操作字根树(映射, 策略::移动)
+        } else if 随机数 < 0.9 {
+            self.随机操作字根树(映射, 策略::产生)
+        } else {
+            self.随机操作字根树(映射, 策略::湮灭)
         }
     }
 }
 
-impl 冰雪双拼操作 {
+impl 冰雪二拼操作 {
     pub fn 新建(数据: &数据) -> Self {
-        let 元素分类 = 冰雪双拼元素分类::新建(数据);
         Self {
-            元素分类,
+            元素分类: 冰雪二拼元素分类::新建(数据),
             键转数字: 数据.键转数字.clone(),
             数字转元素: 数据.数字转元素.clone(),
+            字根树控制器: 字根树控制器::新建(数据),
+            双编码映射: 构建双编码映射(数据),
+            固定字根: 固定字根.map(|x| 数据.元素转数字[x]).into(),
         }
     }
 
@@ -61,8 +84,8 @@ impl 冰雪双拼操作 {
             if 声母列表.len() > 1 {
                 for 声母 in 声母列表 {
                     let 声母名 = self.数字转元素[声母][7..].to_string();
-                    if 可变声母.contains(&声母名.as_str()) {
-                    可移动声母.push(*声母);
+                    if 固定声母.contains(&声母名.as_str()) {
+                        可移动声母.push(*声母);
                     }
                 }
             }
@@ -81,7 +104,7 @@ impl 冰雪双拼操作 {
             .iter()
             .filter(|x| {
                 let 声母名 = self.数字转元素[*x][7..].to_string();
-                可变声母.contains(&声母名.as_str())
+                固定声母.contains(&声母名.as_str())
             })
             .cloned()
             .collect();
@@ -218,51 +241,11 @@ impl 冰雪双拼操作 {
         }
         移动的韵母
     }
-}
-
-pub struct 冰雪双拼形码操作 {
-    元素分类: 冰雪双拼元素分类,
-    字根树控制器: 字根树控制器,
-    键转数字: FxHashMap<char, u64>,
-    双编码映射: HashMap<元素, (元素, 元素)>,
-    固定字根: HashSet<元素>,
-}
-
-#[derive(PartialEq)]
-pub enum 策略 {
-    产生,
-    湮灭,
-    移动,
-}
-
-impl 变异 for 冰雪双拼形码操作 {
-    fn 变异(&mut self, 映射: &mut 元素映射) -> Vec<元素> {
-        let 随机数: f64 = random();
-        if 随机数 < 0.6 {
-            self.随机操作字根树(映射, 策略::移动)
-        } else if 随机数 < 0.8 {
-            self.随机操作字根树(映射, 策略::产生)
-        } else {
-            self.随机操作字根树(映射, 策略::湮灭)
-        }
-    }
-}
-
-impl 冰雪双拼形码操作 {
-    pub fn 新建(数据: &数据) -> Self {
-        Self {
-            元素分类: 冰雪双拼元素分类::新建(数据),
-            键转数字: 数据.键转数字.clone(),
-            字根树控制器: 字根树控制器::新建(数据),
-            双编码映射: 构建双编码映射(数据),
-            固定字根: 固定字根.map(|x| 数据.元素转数字[x]).into(),
-        }
-    }
 
     pub fn 随机移动字根(&self, 映射: &mut 元素映射) -> Vec<元素> {
         let mut rng = thread_rng();
         let 元素 = *self.元素分类.字根列表.choose(&mut rng).unwrap();
-        let 目标按键: Vec<char> = 全集合.chars().collect();
+        let 目标按键: Vec<char> = 小集合.chars().collect();
         let 按键 = 目标按键.choose(&mut rng).unwrap();
         映射[元素] = self.键转数字[按键];
         vec![元素]
@@ -329,7 +312,7 @@ impl 冰雪双拼形码操作 {
         if 策略 == 策略::湮灭 && 父字根 == 0 {
             return vec![];
         }
-        let 所有目标按键集合: Vec<_> = 全集合.chars().map(|x| self.键转数字[&x]).collect();
+        let 所有目标按键集合: Vec<_> = 小集合.chars().map(|x| self.键转数字[&x]).collect();
         let 目标按键 = match 策略 {
             策略::产生 => {
                 let 可行目标按键集合: Vec<_> = 所有目标按键集合
