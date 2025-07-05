@@ -1,10 +1,10 @@
 //! 冰雪二拼的优化问题。
 //!
 
-use crate::dual::构建双编码映射;
-use crate::snow2encoder::空格;
-use crate::tree::字根树控制器;
-use crate::冰雪二拼元素分类;
+use crate::common::dual::构建双编码映射;
+use crate::common::tree::字根树控制器;
+use super::snow2encoder::空格;
+use super::冰雪二拼元素分类;
 use chai::data::{元素, 元素映射, 数据};
 use chai::operators::变异;
 use rand::seq::{IteratorRandom, SliceRandom};

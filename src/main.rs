@@ -4,7 +4,7 @@ use chai::objectives::目标函数;
 use chai::optimizers::{优化方法, 优化问题};
 use chai::{命令, 命令行, 命令行参数, 错误};
 use clap::Parser;
-use snow::{冰雪二拼操作, 冰雪二拼目标函数, 冰雪二拼编码器};
+use snow::snow2::{冰雪二拼操作, 冰雪二拼目标函数, 冰雪二拼编码器};
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;

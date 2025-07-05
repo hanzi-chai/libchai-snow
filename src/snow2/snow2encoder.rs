@@ -1,5 +1,5 @@
-use crate::dual::构建双编码映射;
-use crate::冰雪二拼元素分类;
+use crate::common::dual::构建双编码映射;
+use super::冰雪二拼元素分类;
 use chai::data::{元素, 元素映射, 可编码对象, 数据, 编码信息, 键};
 use chai::encoders::编码器;
 use chai::错误;

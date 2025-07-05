@@ -1,4 +1,5 @@
-use crate::{snow2encoder::空格, tree::字根树控制器, 冰雪二拼元素分类};
+use super::{snow2encoder::空格, 冰雪二拼元素分类};
+use crate::common::tree::字根树控制器;
 use chai::data::{元素映射, 数据, 编码, 编码信息, 部分编码信息};
 use chai::objectives::default::默认目标函数参数;
 use chai::objectives::目标函数;
