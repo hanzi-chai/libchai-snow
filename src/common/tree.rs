@@ -1,4 +1,5 @@
-use chai::data::{元素, 元素映射, 数据};
+use chai::{元素, 元素映射};
+use chai::contexts::default::默认上下文;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::read_to_string};
 
@@ -54,7 +55,7 @@ pub struct 字根树控制器 {
 }
 
 impl 字根树控制器 {
-    pub fn 新建(数据: &数据) -> Self {
+    pub fn 新建(数据: &默认上下文) -> Self {
         let 原始字根树内容 = read_to_string("tree.yaml").unwrap();
         let 原始字根树: 原始字根树 = serde_yaml::from_str(&原始字根树内容).unwrap();
         let mut 父映射 = HashMap::new();
@@ -66,13 +67,13 @@ impl 字根树控制器 {
 
     pub fn 构建字根树和父映射(
         原始: 原始字根树,
-        数据: &数据,
+        数据: &默认上下文,
         父映射: &mut HashMap<元素, 元素>,
     ) -> 字根树 {
         let 字根 = if 原始.字根 == "" {
             0
         } else {
-            数据.元素转数字[&原始.字根]
+            数据.棱镜.元素转数字[&原始.字根]
         };
         if 原始.孩子们.is_empty() {
             return 字根树 {

@@ -5,7 +5,8 @@ use crate::common::dual::构建双编码映射;
 use crate::common::tree::字根树控制器;
 use super::snow2encoder::空格;
 use super::冰雪二拼元素分类;
-use chai::data::{元素, 元素映射, 数据};
+use chai::{元素, 元素映射};
+use chai::contexts::default::默认上下文;
 use chai::operators::变异;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{random, thread_rng};
@@ -40,6 +41,7 @@ pub enum 策略 {
 }
 
 impl 变异 for 冰雪二拼操作 {
+    type 解类型 = 元素映射;
     fn 变异(&mut self, 映射: &mut 元素映射) -> Vec<元素> {
         let 随机数: f64 = random();
         if 随机数 < 0.05 {
@@ -61,14 +63,14 @@ impl 变异 for 冰雪二拼操作 {
 }
 
 impl 冰雪二拼操作 {
-    pub fn 新建(数据: &数据) -> Self {
+    pub fn 新建(数据: &默认上下文) -> Self {
         Self {
             元素分类: 冰雪二拼元素分类::新建(数据),
-            键转数字: 数据.键转数字.clone(),
-            数字转元素: 数据.数字转元素.clone(),
+            键转数字: 数据.棱镜.键转数字.clone(),
+            数字转元素: 数据.棱镜.数字转元素.clone(),
             字根树控制器: 字根树控制器::新建(数据),
             双编码映射: 构建双编码映射(数据),
-            固定字根: 固定字根.map(|x| 数据.元素转数字[x]).into(),
+            固定字根: 固定字根.map(|x| 数据.棱镜.元素转数字[x]).into(),
         }
     }
 

@@ -1,8 +1,9 @@
-use crate::common::dual::构建双编码映射;
 use super::冰雪二拼元素分类;
-use chai::data::{元素, 元素映射, 可编码对象, 数据, 编码信息, 键};
+use crate::common::dual::构建双编码映射;
+use chai::contexts::default::默认上下文;
 use chai::encoders::编码器;
 use chai::错误;
+use chai::{元素, 元素映射, 可编码对象, 编码信息, 键};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::iter::zip;
@@ -11,7 +12,6 @@ pub const 空格: 键 = 31;
 
 pub struct 冰雪二拼编码器 {
     pub 进制: u64,
-    pub 编码结果: Vec<编码信息>,
     pub 词列表: Vec<可编码对象>,
     pub 全码空间: Vec<u8>,
     pub 简码空间: Vec<u8>,
@@ -23,11 +23,10 @@ pub struct 冰雪二拼编码器 {
 }
 
 impl 冰雪二拼编码器 {
-    pub fn 新建(数据: &数据) -> Result<Self, 错误> {
+    pub fn 新建(数据: &默认上下文) -> Result<Self, 错误> {
         let 最大码长 = 4;
         let 词列表 = 数据.词列表.clone();
-        let 编码结果 = 词列表.iter().map(编码信息::new).collect();
-        let 编码空间大小 = 数据.进制.pow(最大码长 as u32) as usize;
+        let 编码空间大小 = 数据.棱镜.进制.pow(最大码长 as u32) as usize;
         let 全码空间 = vec![u8::default(); 编码空间大小];
         let 简码空间 = 全码空间.clone();
         let mut 包含元素的词映射 = vec![vec![]; 数据.初始映射.len()];
@@ -36,17 +35,19 @@ impl 冰雪二拼编码器 {
                 包含元素的词映射[*元素].push(索引);
             }
         }
-        let 一字数量 = 词列表.iter().position(|x| x.词长 > 1).unwrap_or(词列表.len());
+        let 一字数量 = 词列表
+            .iter()
+            .position(|x| x.词长 > 1)
+            .unwrap_or(词列表.len());
         let 双编码映射 = 构建双编码映射(数据);
         let 编码器 = Self {
-            进制: 数据.进制,
-            编码结果,
+            进制: 数据.棱镜.进制,
             词列表,
             全码空间,
             简码空间,
             包含元素的词映射,
             双编码映射,
-            数字转元素: 数据.数字转元素.clone(),
+            数字转元素: 数据.棱镜.数字转元素.clone(),
             元素分类: 冰雪二拼元素分类::新建(数据),
             一字数量,
         };
@@ -104,8 +105,13 @@ impl 冰雪二拼编码器 {
         }
     }
 
-    fn 输出全码(&mut self, 映射: &元素映射, 移动的元素: &Option<Vec<元素>>, 仅形码改变: bool) {
-        let 编码结果 = &mut self.编码结果;
+    fn 输出全码(
+        &mut self,
+        编码结果: &mut [编码信息],
+        映射: &元素映射,
+        移动的元素: &Option<Vec<元素>>,
+        仅形码改变: bool,
+    ) {
         let 进制 = self.进制;
         if let Some(移动的元素) = 移动的元素 {
             for 元素 in 移动的元素 {
@@ -133,8 +139,7 @@ impl 冰雪二拼编码器 {
         }
     }
 
-    fn 输出简码(&mut self) {
-        let 编码结果 = &mut self.编码结果;
+    fn 输出简码(&mut self, 编码结果: &mut [编码信息]) {
         let 进制 = self.进制;
         let mut 索引 = 0;
         for 编码信息 in 编码结果.iter_mut() {
@@ -175,11 +180,10 @@ impl 冰雪二拼编码器 {
 }
 
 impl 编码器 for 冰雪二拼编码器 {
+    type 解类型 = 元素映射;
     fn 编码(
-        &mut self,
-        映射: &元素映射,
-        移动的元素: &Option<Vec<元素>>,
-    ) -> &mut Vec<编码信息> {
+        &mut self, 映射: &元素映射, 移动的元素: &Option<Vec<元素>>, 输出: &mut [编码信息]
+    ) {
         self.重置空间();
         let 仅形码改变 = if let Some(移动的元素) = 移动的元素 {
             移动的元素
@@ -188,8 +192,7 @@ impl 编码器 for 冰雪二拼编码器 {
         } else {
             false
         };
-        self.输出全码(映射, 移动的元素, 仅形码改变);
-        self.输出简码();
-        &mut self.编码结果
+        self.输出全码(输出, 映射, 移动的元素, 仅形码改变);
+        self.输出简码(输出);
     }
 }

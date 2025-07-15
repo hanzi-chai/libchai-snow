@@ -1,28 +1,31 @@
 use chai::config::SolverConfig;
-use chai::encoders::编码器;
+use chai::interfaces::command_line::{
+    从命令行参数创建, 命令, 命令行, 默认命令行参数
+};
 use chai::objectives::目标函数;
-use chai::optimizers::{优化方法, 优化问题};
-use chai::{命令, 命令行, 命令行参数, 错误};
+use chai::错误;
 use clap::Parser;
-use snow::snow2::{冰雪二拼操作, 冰雪二拼目标函数, 冰雪二拼编码器};
+use snow::qingyun::encoder::冰雪清韵编码器;
+use snow::qingyun::objective::冰雪清韵目标函数;
+use snow::qingyun::operators::冰雪清韵操作;
+use snow::qingyun::冰雪清韵上下文;
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;
 
 fn main() -> Result<(), 错误> {
-    let 参数 = 命令行参数::parse();
+    let 参数 = 默认命令行参数::parse();
+    let 输入 = 从命令行参数创建(&参数);
     let 命令行 = 命令行::新建(参数, None);
-    let mut 数据 = 命令行.准备数据();
-    数据.词列表.sort_by_key(|词| 词.词长);
-    let _config = 数据.配置.clone();
+    let 上下文 = 冰雪清韵上下文::新建(输入)?;
+    let _config = 上下文.配置.clone();
     match 命令行.参数.command {
         命令::Encode => {
-            let mut 编码器 = 冰雪二拼编码器::新建(&数据)?;
-            let mut 目标函数 = 冰雪二拼目标函数::新建(&数据)?;
-            let mut 编码结果 = 编码器.编码(&数据.初始映射, &None).clone();
-            let 码表 = 数据.生成码表(&编码结果);
-            let (指标, 分数) = 目标函数.计算(&mut 编码结果, &数据.初始映射);
-            println!("分数：{:.4}", 分数);
+            let 编码器 = 冰雪清韵编码器::新建(&上下文)?;
+            let mut 目标函数 = 冰雪清韵目标函数::新建(编码器);
+            let (指标, 分数) = 目标函数.计算(&上下文.初始决策, &None);
+            println!("分数：{分数:.4}");
+            let 码表 = 上下文.生成码表(&目标函数.编码结果);
             命令行.输出编码结果(码表);
             命令行.输出评测指标(指标);
         }
@@ -32,17 +35,22 @@ fn main() -> Result<(), 错误> {
                 _config.optimization.unwrap().metaheuristic.unwrap();
             let mut 线程池 = vec![];
             for 线程序号 in 0..线程数 {
-                let 编码器 = 冰雪二拼编码器::新建(&数据)?;
-                let 目标函数 = 冰雪二拼目标函数::新建(&数据)?;
-                let 操作 = 冰雪二拼操作::新建(&数据);
-                let mut 问题 = 优化问题::新建(数据.clone(), 编码器, 目标函数, 操作);
+                let 编码器 = 冰雪清韵编码器::新建(&上下文)?;
+                let mut 目标函数 = 冰雪清韵目标函数::新建(编码器);
+                let mut 操作 = 冰雪清韵操作::新建(&上下文);
                 let 优化方法 = 退火.clone();
-                let 数据 = 数据.clone();
+                let 上下文 = 上下文.clone();
                 let 子命令行 = 命令行.生成子命令行(线程序号);
                 let 线程 = spawn(move || {
-                    let 优化结果 = 优化方法.优化(&mut 问题, &子命令行);
-                    let 编码结果 = 问题.编码器.编码(&优化结果.映射, &None);
-                    let 码表 = 数据.生成码表(&编码结果);
+                    let 优化结果 = 优化方法.优化(
+                        &上下文.初始决策,
+                        &mut 目标函数,
+                        &mut 操作,
+                        &上下文,
+                        &子命令行,
+                    );
+                    目标函数.计算(&优化结果.映射, &None);
+                    let 码表 = 上下文.生成码表(&目标函数.编码结果);
                     子命令行.输出编码结果(码表);
                     return 优化结果;
                 });

@@ -2,9 +2,10 @@
 //!
 
 use chai::{
-    data::{元素, 元素映射, 数据, 键},
     operators::变异,
+    {元素, 元素映射, 键},
 };
+use chai::contexts::default::默认上下文;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
@@ -18,6 +19,8 @@ pub struct 冰雪四拼操作 {
 }
 
 impl 变异 for 冰雪四拼操作 {
+    type 解类型 = 元素映射;
+
     fn 变异(&mut self, 映射: &mut 元素映射) -> Vec<元素> {
         let index1 = self.index % self.group1.len();
         let index2 = (self.index / self.group1.len()) % self.group2.len();
@@ -66,7 +69,7 @@ fn make_permutation<T: Clone>(elements: &Vec<T>) -> Vec<Vec<T>> {
 }
 
 impl 冰雪四拼操作 {
-    pub fn new(数据: 数据) -> Self {
+    pub fn new(数据: 默认上下文) -> Self {
         let group1 = vec![
             ['G', 'K', 'H'],
             ['J', 'Q', 'X'],
@@ -80,8 +83,8 @@ impl 冰雪四拼操作 {
             group2: make_permutation(&group2),
             group3: make_permutation(&group3),
             index: 0,
-            元素转数字: 数据.元素转数字.clone(),
-            键转数字: 数据.键转数字.clone(),
+            元素转数字: 数据.棱镜.元素转数字.clone(),
+            键转数字: 数据.棱镜.键转数字.clone(),
         }
     }
 }

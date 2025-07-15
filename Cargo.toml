@@ -5,8 +5,9 @@ edition = "2024"
 
 [dependencies]
 clap = "4.5.32"
+indexmap = "2.10.0"
 itertools = "0.14.0"
-libchai = "0.2.5"
+libchai = { version = "0.3.0", path = "../libchai" }
 num_cpus = "1.16.0"
 rand = "0.8.5"
 rustc-hash = "2.1.1"

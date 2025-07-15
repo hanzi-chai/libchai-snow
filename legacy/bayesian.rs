@@ -2,7 +2,6 @@ use chai::config::SolverConfig;
 use chai::optimizers::simulated_annealing::降温时间表;
 use chai::optimizers::{优化方法, 优化问题};
 use chai::{命令行, 命令行参数, 错误};
-use clap::Parser;
 use snow::snow2::snow2objective::冰雪二拼目标函数;
 use snow::snow2::snow2operators::冰雪二拼操作;
 use snow::snow2::冰雪二拼编码器;

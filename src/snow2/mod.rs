@@ -3,8 +3,8 @@ pub use snow2encoder::冰雪二拼编码器;
 pub mod snow2objective;
 pub use snow2objective::冰雪二拼目标函数;
 pub mod snow2operators;
+use chai::{contexts::default::默认上下文, 元素};
 pub use snow2operators::冰雪二拼操作;
-use chai::data::{元素, 数据};
 use std::collections::HashMap;
 
 pub const 声调总数: usize = 5;
@@ -17,13 +17,13 @@ pub struct 冰雪二拼元素分类 {
 }
 
 impl 冰雪二拼元素分类 {
-    pub fn 新建(数据: &数据) -> Self {
+    pub fn 新建(数据: &默认上下文) -> Self {
         let mut 声母列表 = vec![];
         let mut 韵母列表 = vec![];
         let mut 韵部映射 = HashMap::new();
         let mut 字根列表 = vec![];
-        for 元素 in (数据.进制 as usize)..数据.初始映射.len() {
-            let 元素名 = &数据.数字转元素[&元素];
+        for 元素 in (数据.棱镜.进制 as usize)..数据.初始映射.len() {
+            let 元素名 = &数据.棱镜.数字转元素[&元素];
             if 元素名.starts_with("冰声") {
                 声母列表.push(元素);
             } else if 元素名.starts_with("冰韵") {

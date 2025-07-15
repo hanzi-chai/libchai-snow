@@ -1,9 +1,12 @@
 use super::{snow2encoder::空格, 冰雪二拼元素分类};
 use crate::common::tree::字根树控制器;
-use chai::data::{元素映射, 数据, 编码, 编码信息, 部分编码信息};
+use crate::snow2::冰雪二拼编码器;
+use chai::contexts::default::默认上下文;
+use chai::encoders::编码器;
 use chai::objectives::default::默认目标函数参数;
 use chai::objectives::目标函数;
-use chai::错误;
+use chai::{元素, 错误};
+use chai::{元素映射, 编码, 编码信息, 部分编码信息};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::iter::zip;
@@ -270,16 +273,30 @@ impl 冰雪二拼缓存 {
 pub struct 冰雪二拼目标函数 {
     参数: 默认目标函数参数,
     缓存: 冰雪二拼缓存,
+    缓存缓冲: 冰雪二拼缓存,
     字根树控制器: 字根树控制器,
     元素分类: 冰雪二拼元素分类,
+    编码器: 冰雪二拼编码器,
+    编码结果: Vec<编码信息>,
+    编码结果缓冲: Vec<编码信息>,
 }
 
 impl 冰雪二拼目标函数 {
-    pub fn 新建(数据: &数据) -> Result<Self, 错误> {
+    pub fn 新建(数据: &默认上下文, 编码器: 冰雪二拼编码器) -> Result<Self, 错误> {
         let 键位分布信息 = 数据.键位分布信息.clone();
         let 当量信息 = 数据.当量信息.clone();
-        let mut 正则化 = 数据.正则化.clone();
-        let 指法计数 = 数据.预处理指法标记();
+        let mut 正则化 = 默认上下文::预处理正则化(
+            &数据
+                .配置
+                .clone()
+                .optimization
+                .unwrap()
+                .objective
+                .regularization
+                .unwrap(),
+            &数据.棱镜.元素转数字,
+        )?;
+        let 指法计数 = 数据.棱镜.预处理指法标记(数据.get_space());
         let 元素分类 = 冰雪二拼元素分类::新建(数据);
         let 字根树控制器 = 字根树控制器::新建(数据);
         for (字根, 父字根) in 字根树控制器.父映射.iter() {
@@ -300,38 +317,53 @@ impl 冰雪二拼目标函数 {
             键位分布信息,
             当量信息,
             指法计数,
-            数字转键: 数据.数字转键.clone(),
+            数字转键: 数据.棱镜.数字转键.clone(),
             正则化,
             正则化强度: 0.0,
         };
         Ok(Self {
             参数,
-            缓存: 冰雪二拼缓存::新建(数据.进制),
             字根树控制器,
             元素分类,
+            编码器,
+            编码结果: 数据.词列表.iter().map(编码信息::new).collect(),
+            编码结果缓冲: 数据.词列表.iter().map(编码信息::new).collect(),
+            缓存: 冰雪二拼缓存::新建(数据.棱镜.进制),
+            缓存缓冲: 冰雪二拼缓存::新建(数据.棱镜.进制),
         })
     }
 }
 
 impl 目标函数 for 冰雪二拼目标函数 {
     type 目标值 = 冰雪二拼指标;
+    type 解类型 = 元素映射;
+
     fn 计算(
-        &mut self, 编码结果: &mut [编码信息], 映射: &元素映射
+        &mut self, 映射: &元素映射, 变化: &Option<Vec<元素>>
     ) -> (Self::目标值, f64) {
         use 编码类型::*;
-        for (索引, 编码信息) in 编码结果.iter_mut().enumerate() {
+
+        self.缓存缓冲.clone_from(&self.缓存);
+        self.编码结果缓冲.clone_from(&self.编码结果);
+
+        self.编码器.编码(映射, 变化, &mut self.编码结果缓冲);
+        for (索引, 编码信息) in self.编码结果缓冲.iter_mut().enumerate() {
             let 编码信息 {
                 频率, 全码, 简码,
             ..
             } = 编码信息;
             if 编码信息.词长 == 1 {
-                self.缓存.处理(一字全码, 索引, *频率, 全码, &self.参数);
-                self.缓存.处理(一字简码, 索引, *频率, 简码, &self.参数);
+                self.缓存缓冲.处理(一字全码, 索引, *频率, 全码, &self.参数);
+                self.缓存缓冲.处理(一字简码, 索引, *频率, 简码, &self.参数);
             } else {
-                self.缓存.处理(多字全码, 索引, *频率, 全码, &self.参数);
+                self.缓存缓冲.处理(多字全码, 索引, *频率, 全码, &self.参数);
             }
         }
-        let (mut 指标, 损失函数) = self.缓存.汇总(&self.参数);
+        let (mut 指标, 损失函数) = self.缓存缓冲.汇总(&self.参数);
+        if 变化.is_none() {
+            self.缓存.clone_from(&self.缓存缓冲);
+            self.编码结果.clone_from(&self.编码结果缓冲);
+        }
         for 韵部 in &self.元素分类.韵部列表 {
             let 阴平韵母 = 韵部[0];
             let 被归并 = self
@@ -379,5 +411,10 @@ impl 目标函数 for 冰雪二拼目标函数 {
             + 指标.字根记忆量 as f64 * 0.0003
             + 指标.字根数 as f64 * 0.0004;
         return (指标, 损失函数);
+    }
+
+    fn 接受新解(&mut self) {
+        self.缓存.clone_from(&self.缓存缓冲);
+        self.编码结果.clone_from(&self.编码结果缓冲);
     }
 }
