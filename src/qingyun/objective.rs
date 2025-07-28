@@ -7,10 +7,23 @@ use chai::{
 };
 use rustc_hash::FxHashMap;
 use serde::Serialize;
-use std::{cmp, fmt::Display, iter::zip};
+use std::{fmt::Display, iter::zip};
 
 const 分级数: usize = 5;
 const 分级大小: [usize; 分级数] = [1500, 3000, 4500, 6000, usize::MAX];
+
+type 分段线性函数 = Vec<(usize, f64)>;
+
+pub fn 线性插值(x: usize, 分段函数: &分段线性函数) -> f64 {
+    let i = 分段函数.iter().position(|&(x1, _)| x1 > x).unwrap();
+    if i == 0 {
+        分段函数[0].1
+    } else {
+        let (x1, y1) = 分段函数[i - 1];
+        let (x2, y2) = 分段函数[i];
+        y1 + (y2 - y1) * (x - x1) as f64 / (x2 - x1) as f64
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct 冰雪清韵指标 {
@@ -152,8 +165,18 @@ impl 目标函数 for 冰雪清韵目标函数 {
         let mut 总稳健组合当量 = 0.0;
         let mut 按键数向量 = vec![0; 进制 as usize];
         let mut 总键数 = 0;
+        let 分段函数 = vec![
+            (0, 15.),
+            (500, 10.),
+            (1500, 8.),
+            (2000, 6.),
+            (3000, 2.),
+            (4500, 1.5),
+            (6000, 1.),
+            (usize::MAX, 1.),
+        ];
         for (序号, 编码信息) in self.编码结果缓冲.iter_mut().enumerate() {
-            let 稳健频率 = 1.0 / cmp::max(500, 序号) as f64;
+            let 稳健频率 = 线性插值(序号, &分段函数);
             if 编码信息.全码.选重标记 {
                 选重频率 += 编码信息.频率;
                 稳健选重频率 += 稳健频率;
@@ -219,7 +242,7 @@ impl 目标函数 for 冰雪清韵目标函数 {
             码长,
             按键分布偏差,
         };
-        let 目标函数值 = 稳健选重率 + 稳健组合当量 * 0.01 + 按键分布偏差 * 0.01 + 码长 * 0.01;
+        let 目标函数值 = 稳健选重率 + 稳健组合当量 * 0.1 + 按键分布偏差 * 0.01 + 码长 * 0.03;
 
         if 变化.is_none() {
             self.编码结果.clone_from(&self.编码结果缓冲);

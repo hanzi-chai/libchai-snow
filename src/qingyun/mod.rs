@@ -2,7 +2,12 @@ pub mod encoder;
 pub mod objective;
 pub mod operators;
 use chai::{
-    config::{Mapped, 配置}, contexts::上下文, interfaces::默认输入, optimizers::解特征, 元素映射, 原始可编码对象, 原始当量信息, 原始键位分布信息, 棱镜, 码表项, 编码, 编码信息, 错误
+    config::{Mapped, 配置},
+    contexts::上下文,
+    interfaces::默认输入,
+    objectives::metric::指法标记,
+    optimizers::解特征,
+    元素映射, 原始可编码对象, 原始当量信息, 原始键位分布信息, 棱镜, 码表项, 编码, 编码信息, 错误,
 };
 use chrono::Local;
 use core::panic;
@@ -10,7 +15,12 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{from_str, to_string};
-use std::{cmp::Reverse, fs::read_to_string};
+use std::{
+    cmp::Reverse,
+    fs::{File, read_to_string},
+    io::Write,
+    path::PathBuf,
+};
 
 pub const 大集合: &str = "bpmfdtnlgkhjqxzcsrwyv";
 pub const 小集合: &str = "eaiou;,./_";
@@ -56,15 +66,16 @@ impl 冰雪清韵决策 {
         }
         for (元素, 安排) in &self.字根 {
             let 索引 = 棱镜.元素转数字[元素];
+            if 元素 == "6" {
+                let 字根索引 = 棱镜.元素转数字["5"];
+                映射[索引] = 映射[字根索引];
+                映射[索引 + 1] = 棱镜.键转数字[&'i'];
+                continue;
+            }
             match 安排 {
                 字根安排::未选取 => {}
                 字根安排::乱序 { 键位 } => {
                     映射[索引] = 棱镜.键转数字[键位];
-                    映射[索引 + 1] = 空格;
-                }
-                字根安排::声母 { 声母 } => {
-                    let 声母索引 = 棱镜.元素转数字[声母];
-                    映射[索引] = 映射[声母索引];
                     映射[索引 + 1] = 空格;
                 }
                 字根安排::读音 { 声母, 韵母 } => {
@@ -104,7 +115,6 @@ pub enum 韵母安排 {
 pub enum 字根安排 {
     未选取,
     乱序 { 键位: char },
-    声母 { 声母: String },
     读音 { 声母: String, 韵母: String },
     归并 { 字根: String },
 }
@@ -142,7 +152,8 @@ impl 上下文 for 冰雪清韵上下文 {
             Some(format!("{}", Local::now().format("%Y-%m-%d+%H:%M:%S")));
         let 映射 = 解.线性化(&self.棱镜);
         let mut mapping = IndexMap::new();
-        let 全部元素: Vec<_> = 解.声母
+        let 全部元素: Vec<_> = 解
+            .声母
             .keys()
             .chain(解.韵母.keys())
             .chain(解.字根.keys())
@@ -170,6 +181,12 @@ impl 上下文 for 冰雪清韵上下文 {
         新配置.form.mapping = mapping;
         to_string(&新配置).unwrap()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct 分析结果 {
+    pub 重码项: Vec<(String, (Vec<String>, u64))>,
+    pub 差指法: Vec<(String, String)>,
 }
 
 impl 冰雪清韵上下文 {
@@ -243,13 +260,17 @@ impl 冰雪清韵上下文 {
                 元素转数字.insert(元素.clone(), 数字);
                 数字转元素.insert(数字, 元素.clone());
                 if 元素.starts_with("声") {
-                    初始决策.声母.insert(元素.clone(), 编码.chars().next().unwrap());
+                    初始决策
+                        .声母
+                        .insert(元素.clone(), 编码.chars().next().unwrap());
                     match 元素.as_str() {
                         "声-zh" | "声-ch" | "声-sh" | "声-0" => {
                             决策空间.声母.insert(元素.clone(), 大集合.chars().collect());
                         }
                         _ => {
-                            决策空间.声母.insert(元素.clone(), vec![初始决策.声母[&元素]]);
+                            决策空间
+                                .声母
+                                .insert(元素.clone(), vec![初始决策.声母[&元素]]);
                         }
                     }
                 } else if 元素.starts_with("韵") {
@@ -295,14 +316,15 @@ impl 冰雪清韵上下文 {
                 let mut 匹配 = false;
                 for 安排 in 决策空间.字根[&元素].iter().chain(乱序安排.iter()) {
                     匹配 = match 安排 {
-                        字根安排::声母 { 声母 } => 编码 == 投影(&映射[声母]),
                         字根安排::读音 { 声母, 韵母 } => {
                             编码 == 投影(&映射[声母]) + 投影(&映射[韵母]).as_str()
                         }
                         字根安排::归并 { 字根 } => {
                             映射.contains_key(字根) && 编码 == 投影(&映射[字根])
                         }
-                        字根安排::乱序 { 键位 } => 允许乱序 && 编码 == 键位.to_string(),
+                        字根安排::乱序 { 键位 } => {
+                            (允许乱序 || "123456".contains(&元素)) && 编码 == 键位.to_string()
+                        }
                         字根安排::未选取 => 编码 == "a",
                     };
                     if 匹配 {
@@ -353,5 +375,44 @@ impl 冰雪清韵上下文 {
             码表.push(码表项);
         }
         码表
+    }
+
+    // 分析前 3000 字中全码重码和简码差指法的情况
+    pub fn 分析码表(&self, 码表: &[码表项], 路径: &PathBuf) {
+        let 指法标记 = 指法标记::new();
+        let mut 文件 = File::create(路径).unwrap();
+        let mut 翻转码表: FxHashMap<String, (Vec<String>, u64)> = FxHashMap::default();
+        for 码表项 in &码表[..3000] {
+            let 记录 = 翻转码表
+                .entry(码表项.full.clone())
+                .or_insert_with(|| (vec![], 0));
+            记录.0.push(码表项.name.clone());
+            if 记录.0.len() == 2 {
+                记录.1 = self
+                    .词列表
+                    .iter()
+                    .find(|x| x.name == 码表项.name)
+                    .unwrap()
+                    .frequency;
+            }
+            for 键索引 in 0..(码表项.short.len() - 1) {
+                let 组合 = (
+                    码表项.short.chars().nth(键索引).unwrap(),
+                    码表项.short.chars().nth(键索引 + 1).unwrap(),
+                );
+                if 指法标记.同指大跨排.contains(&组合) || 指法标记.错手.contains(&组合)
+                {
+                    writeln!(文件, "{} {}", 码表项.name, 码表项.short).unwrap();
+                }
+            }
+        }
+        let mut 重码项: Vec<_> = 翻转码表
+            .into_iter()
+            .filter(|(_, (names, _))| names.len() > 1)
+            .collect();
+        重码项.sort_by_key(|(_, (_, frequency))| Reverse(*frequency));
+        for (full, (names, frequency)) in 重码项 {
+            writeln!(文件, "{full} {names:?} ({frequency})").unwrap();
+        }
     }
 }

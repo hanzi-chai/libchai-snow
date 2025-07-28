@@ -4,7 +4,6 @@ use crate::qingyun::{
 use chai::{operators::变异, 棱镜};
 use rand::{random, seq::IteratorRandom, thread_rng};
 use rustc_hash::FxHashSet;
-use std::collections::HashSet;
 
 pub struct 冰雪清韵操作 {
     _棱镜: 棱镜,
@@ -19,10 +18,10 @@ impl 变异 for 冰雪清韵操作 {
             self.移动声母(决策)
         } else if 随机数 < 0.2 {
             self.移动韵母(决策)
-        } else if 随机数 < 0.3 {
-            self.产生主根(决策)
         } else if 随机数 < 0.4 {
-            self.湮灭主根(决策)
+            self.交换主副根(决策)
+        } else if 随机数 < 0.45 {
+            self.移动笔画(决策)
         } else if 随机数 < 0.5 {
             self.交换主根(决策)
         } else if 随机数 < 0.6 {
@@ -172,17 +171,8 @@ impl 冰雪清韵操作 {
         冰雪清韵决策变化::新建()
     }
 
-    fn 产生主根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
+    fn 交换主副根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
         let mut rng = thread_rng();
-        let mut 可行主根位置: HashSet<_> = 大集合.chars().collect();
-        for 安排 in 决策.字根.values() {
-            if let 字根安排::乱序 { 键位 } = 安排 {
-                可行主根位置.remove(&键位);
-            }
-        }
-        if 可行主根位置.is_empty() {
-            return 冰雪清韵决策变化::新建();
-        }
         let 字根 = self
             .决策空间
             .允许乱序
@@ -190,35 +180,41 @@ impl 冰雪清韵操作 {
             .filter(|&x| matches!(决策.字根[x], 字根安排::归并 { .. } | 字根安排::读音 { .. }))
             .choose(&mut rng)
             .unwrap();
-        决策.字根[字根] = 字根安排::乱序 {
-            键位: *可行主根位置.iter().choose(&mut rng).unwrap(),
-        };
-        冰雪清韵决策变化::新建()
-    }
-
-    fn 湮灭主根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
-        let 主根列表: Vec<_> = 决策
+        let 键位 = 大集合.chars().choose(&mut rng).unwrap();
+        let 当前该键位上主根 = 决策
             .字根
             .iter()
-            .filter(|(_, y)| matches!(y, 字根安排::乱序 { .. }))
-            .map(|(字根, _)| 字根.clone())
-            .collect();
-        if 主根列表.is_empty() {
-            return 冰雪清韵决策变化::新建();
-        }
-        let 字根 = 主根列表.into_iter().choose(&mut rng).unwrap();
-        let 安排列表 = &self.决策空间.字根[&字根];
-        决策.字根[&字根] = 安排列表
+            .find(|(字根, 安排)| {
+                !"123456".contains(*字根)
+                    && matches!(安排, 字根安排::乱序 { 键位: k } if *k == 键位)
+            })
+            .unwrap()
+            .0
+            .clone();
+        决策.字根[字根] = 字根安排::乱序 { 键位 };
+        决策.字根[&当前该键位上主根] = self.决策空间.字根[&当前该键位上主根]
             .iter()
             .filter(|&x| match x {
                 字根安排::未选取 | 字根安排::乱序 { .. } => false,
-                字根安排::归并 { 字根 } => 决策.字根[字根] != 字根安排::未选取,
+                字根安排::归并 {
+                    字根: 归并到字根
+                } => 决策.字根[归并到字根] != 字根安排::未选取,
                 _ => true,
             })
             .choose(&mut rng)
             .unwrap()
             .clone();
+        冰雪清韵决策变化::新建()
+    }
+
+    fn 移动笔画(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
+        let mut rng = thread_rng();
+        let 字根 = ["1", "2", "3", "4", "5"]
+            .into_iter()
+            .choose(&mut rng)
+            .unwrap();
+        let 键位 = 大集合.chars().choose(&mut rng).unwrap();
+        决策.字根[字根] = 字根安排::乱序 { 键位 };
         冰雪清韵决策变化::新建()
     }
 
@@ -228,7 +224,7 @@ impl 冰雪清韵操作 {
             .字根
             .clone()
             .into_iter()
-            .filter(|(_, y)| matches!(y, 字根安排::乱序 { .. }))
+            .filter(|(k, y)| !"123456".contains(k) && matches!(y, 字根安排::乱序 { .. }))
             .collect();
         if 主根列表.len() < 2 {
             return 冰雪清韵决策变化::新建();
