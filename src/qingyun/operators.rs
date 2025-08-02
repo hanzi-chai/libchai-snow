@@ -185,8 +185,7 @@ impl 冰雪清韵操作 {
             .字根
             .iter()
             .find(|(字根, 安排)| {
-                !"123456".contains(*字根)
-                    && matches!(安排, 字根安排::乱序 { 键位: k } if *k == 键位)
+                !"12345".contains(*字根) && matches!(安排, 字根安排::乱序 { 键位: k } if *k == 键位)
             })
             .unwrap()
             .0
@@ -224,7 +223,7 @@ impl 冰雪清韵操作 {
             .字根
             .clone()
             .into_iter()
-            .filter(|(k, y)| !"123456".contains(k) && matches!(y, 字根安排::乱序 { .. }))
+            .filter(|(k, y)| !"12345".contains(k) && matches!(y, 字根安排::乱序 { .. }))
             .collect();
         if 主根列表.len() < 2 {
             return 冰雪清韵决策变化::新建();

@@ -22,6 +22,7 @@ pub struct 冰雪清韵编码器 {
     pub 编码空间: Vec<u8>,
     pub 棱镜: 棱镜,
     pub 当量信息: Vec<f64>,
+    pub 全部出简: bool,
 }
 
 type 原始固定拆分 = HashMap<String, Vec<String>>;
@@ -35,7 +36,7 @@ struct 拆分输入 {
 }
 
 impl 冰雪清韵编码器 {
-    pub fn 新建(上下文: &冰雪清韵上下文) -> Result<Self, 错误> {
+    pub fn 新建(上下文: &冰雪清韵上下文, 全部出简: bool) -> Result<Self, 错误> {
         let 当量信息 = 上下文
             .棱镜
             .预处理当量信息(&上下文.原始当量信息, 进制.pow(最大码长 as u32) as usize);
@@ -106,6 +107,7 @@ impl 冰雪清韵编码器 {
             棱镜: 上下文.棱镜.clone(),
             当量信息,
             优先简码,
+            全部出简,
         })
     }
 
@@ -227,6 +229,7 @@ impl 冰雪清韵编码器 {
             }
             self.编码空间[全码 as usize] += 1;
         }
+        let 不太好的字根小码 = [';', '/', ',', '.'].map(|c| self.棱镜.键转数字[&c]);
         // 让前 500 的副根和前 50 的主根占据两键字的位置
         for (序号, 编码信息) in 编码结果.iter_mut().enumerate() {
             // 特简码
@@ -242,9 +245,15 @@ impl 冰雪清韵编码器 {
                 continue;
             }
             let 全码 = 编码信息.全码.原始编码;
-            let 小码 = 全码 / 进制;
-            let 出简 = self.编码空间[全码 as usize] == 0 && (小码 != 空格 || 序号 < 50);
-            if 出简 {
+            let 一简 = 全码 % 进制 + 空格 * 进制;
+            if self.编码空间[一简 as usize] == 0
+                && 不太好的字根小码.contains(&(全码 / 进制))
+                && 序号 < 50
+            {
+                编码信息.简码.原始编码 = 一简;
+                编码信息.简码.有变化 = true;
+                self.编码空间[一简 as usize] += 1;
+            } else if self.编码空间[全码 as usize] == 0 {
                 编码信息.简码.原始编码 = 全码;
                 编码信息.简码.有变化 = true;
                 self.编码空间[全码 as usize] += 1;
@@ -258,11 +267,11 @@ impl 冰雪清韵编码器 {
             .filter(|x| *x != '_')
             .map(|c| self.棱镜.键转数字[&c])
             .collect();
-        let p = self.棱镜.键转数字[&'p'];
-        let y = self.棱镜.键转数字[&'y'];
-        let comma = self.棱镜.键转数字[&','];
-        let period = self.棱镜.键转数字[&'.'];
-        let slash = self.棱镜.键转数字[&'/'];
+        let 不太好的组合 = ["p,", "p.", "p/", "y,", "y.", "y/", "ce", "nu", "mu"].map(|s| {
+            let c1 = s.chars().next().unwrap();
+            let c2 = s.chars().nth(1).unwrap();
+            (self.棱镜.键转数字[&c1], self.棱镜.键转数字[&c2])
+        });
         for (序号, 编码信息) in 编码结果.iter_mut().enumerate() {
             // 跳过已经处理的优先简码
             if 编码信息.简码.有变化 {
@@ -297,7 +306,7 @@ impl 冰雪清韵编码器 {
                 continue;
             }
             // 非字根字的简码：包括一级简码（空格）、一级简码（非空格）、二级简码、全码四种情况
-            if 序号 >= 1500 {
+            if 序号 >= 1500 && !self.全部出简 {
                 编码信息.简码.原始编码 = 全码;
                 continue;
             }
@@ -311,11 +320,13 @@ impl 冰雪清韵编码器 {
             // 一级简码（非空格）
             let mut 普通一简 = 0;
             let mut 最小当量 = f64::MAX;
+            let 第一码 = 全码 % 进制;
             for 键 in &非空格小集合键 {
-                if [p, y].contains(&(全码 % 进制)) && [comma, period, slash].contains(键) {
+                // 避免主动生成不太好的组合
+                if 不太好的组合.contains(&(第一码, *键)) {
                     continue;
                 }
-                let 简码 = 全码 % 进制 + 键 * 进制;
+                let 简码 = 第一码 + 键 * 进制;
                 let 当量 = self.当量信息[简码 as usize];
                 if self.编码空间[简码 as usize] == 0 && 当量 < 最小当量 {
                     普通一简 = 简码;
@@ -333,6 +344,15 @@ impl 冰雪清韵编码器 {
                 if self.编码空间[空格二简 as usize] == 0 {
                     编码信息.简码.原始编码 = 空格二简;
                     self.编码空间[空格二简 as usize] += 1;
+                    continue;
+                }
+            }
+            if self.全部出简 && 全码 > 进制 * 进制 * 进制 {
+                // 三级简码
+                let 空格三简 = 全码 % (进制 * 进制 * 进制) + 空格 * 进制 * 进制 * 进制;
+                if self.编码空间[空格三简 as usize] == 0 {
+                    编码信息.简码.原始编码 = 空格三简;
+                    self.编码空间[空格三简 as usize] += 1;
                     continue;
                 }
             }

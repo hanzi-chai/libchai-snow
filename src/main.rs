@@ -21,7 +21,7 @@ fn main() -> Result<(), 错误> {
     let _config = 上下文.配置.clone();
     match 命令行.参数.command {
         命令::Encode => {
-            let 编码器 = 冰雪清韵编码器::新建(&上下文)?;
+            let 编码器 = 冰雪清韵编码器::新建(&上下文, true)?;
             let mut 目标函数 = 冰雪清韵目标函数::新建(&上下文, 编码器);
             let (指标, 分数) = 目标函数.计算(&上下文.初始决策, &None);
             println!("分数：{分数:.4}");
@@ -35,7 +35,7 @@ fn main() -> Result<(), 错误> {
                 _config.optimization.unwrap().metaheuristic.unwrap();
             let mut 线程池 = vec![];
             for 线程序号 in 0..线程数 {
-                let 编码器 = 冰雪清韵编码器::新建(&上下文)?;
+                let 编码器 = 冰雪清韵编码器::新建(&上下文, false)?;
                 let mut 目标函数 = 冰雪清韵目标函数::新建(&上下文, 编码器);
                 let mut 操作 = 冰雪清韵操作::新建(&上下文);
                 let 优化方法 = 退火.clone();
