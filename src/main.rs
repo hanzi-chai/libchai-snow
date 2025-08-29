@@ -5,10 +5,10 @@ use chai::interfaces::command_line::{
 use chai::objectives::目标函数;
 use chai::错误;
 use clap::Parser;
+use snow::qingyun::context::冰雪清韵上下文;
 use snow::qingyun::encoder::冰雪清韵编码器;
 use snow::qingyun::objective::冰雪清韵目标函数;
 use snow::qingyun::operators::冰雪清韵操作;
-use snow::qingyun::冰雪清韵上下文;
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;
@@ -51,8 +51,10 @@ fn main() -> Result<(), 错误> {
                     );
                     目标函数.计算(&优化结果.映射, &None);
                     let 码表 = 上下文.生成码表(&目标函数.编码结果);
-                    let 分析路径 = 子命令行.输出目录.join("分析.txt");
-                    上下文.分析码表(&码表, &分析路径);
+                    let 分析路径 = 子命令行.输出目录.join("分析.md");
+                    上下文
+                        .分析码表(&目标函数.编码结果, &分析路径)
+                        .expect("分析码表失败");
                     子命令行.输出编码结果(码表);
                     return 优化结果;
                 });
