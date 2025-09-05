@@ -131,7 +131,7 @@ impl 冰雪清韵操作 {
             if !合法 {
                 if 新安排列表.is_empty() || matches!(决策.字根[&元素], 字根安排::乱序 { .. })
                 {
-                    println!("元素 {:?} 没有合法的安排，传播失败", 元素);
+                    println!("{元素:?} 没有合法的安排，传播失败，全部空间为 {:?}", self.决策空间.字根[&元素]);
                     return Err(());
                 } else {
                     let 安排 = 新安排列表.choose(&mut thread_rng()).unwrap();
