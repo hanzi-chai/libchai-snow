@@ -134,7 +134,7 @@ impl 冰雪清韵上下文 {
             键转数字.insert(c, 数字 as u64);
             数字转键.insert(数字 as u64, c);
         }
-        let 所有元素: Vec<String> = from_str(&read_to_string("rules.yaml").unwrap()).unwrap();
+        let 所有元素: Vec<String> = from_str(&read_to_string("data/rules.yaml").unwrap()).unwrap();
         for 元素 in 所有元素 {
             let 编码 = 原始决策.get(&元素).unwrap_or(&Mapped::Unused(()));
             if 元素.starts_with("声") || 元素.starts_with("韵") {
@@ -348,8 +348,8 @@ impl 冰雪清韵上下文 {
         Vec<usize>,
     ) {
         let 拆分输入: 拆分输入 =
-            from_str(&read_to_string("dynamic_analysis.yaml").unwrap()).unwrap();
-        let 繁体字频: FxHashMap<char, u64> = 读取文本文件(PathBuf::from("debug/ftzp.txt"));
+            from_str(&read_to_string("data/dynamic_analysis.yaml").unwrap()).unwrap();
+        let 繁体字频: FxHashMap<char, u64> = 读取文本文件(PathBuf::from("data/ftzp.txt"));
         let mut 动态拆分 = vec![];
         let mut 块转数字 = FxHashMap::default();
         let mut 数字转块 = FxHashMap::default();
