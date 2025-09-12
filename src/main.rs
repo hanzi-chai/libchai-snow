@@ -9,6 +9,7 @@ use snow::qingyun::context::冰雪清韵上下文;
 use snow::qingyun::encoder::冰雪清韵编码器;
 use snow::qingyun::objective::冰雪清韵目标函数;
 use snow::qingyun::operators::冰雪清韵操作;
+use snow::TIMER;
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;
@@ -77,6 +78,7 @@ fn main() -> Result<(), 错误> {
                     线程序号, 优化结果.分数, 优化结果.指标
                 )?;
             }
+            TIMER.report();
         }
     }
     Ok(())

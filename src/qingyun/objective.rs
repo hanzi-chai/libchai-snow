@@ -1,6 +1,9 @@
-use crate::qingyun::{
-    context::冰雪清韵上下文, encoder::冰雪清韵编码器, 冰雪清韵决策, 冰雪清韵决策变化,
-    冰雪清韵编码信息, 字根安排, 最大码长, 特简字, 进制,
+use crate::{
+    qingyun::{
+        context::冰雪清韵上下文, encoder::冰雪清韵编码器, 冰雪清韵决策, 冰雪清韵决策变化,
+        冰雪清韵编码信息, 字根安排, 最大码长, 特简字, 进制,
+    },
+    time_block,
 };
 use chai::{objectives::目标函数, 元素, 棱镜, 键位分布信息};
 use rustc_hash::FxHashMap;
@@ -157,119 +160,126 @@ impl 目标函数 for 冰雪清韵目标函数 {
         解: &冰雪清韵决策,
         变化: &Option<冰雪清韵决策变化>,
     ) -> (冰雪清韵指标, f64) {
-        self.编码结果缓冲.clone_from(&self.编码结果);
-        self.拆分序列缓冲.clone_from(&self.拆分序列);
-        if let Some(变化) = 变化 {
-            if 变化.拆分改变 {
+        time_block!("备份", {
+            self.编码结果缓冲.clone_from(&self.编码结果);
+            self.拆分序列缓冲.clone_from(&self.拆分序列);
+        });
+        time_block!("构建拆分序列", {
+            if let Some(变化) = 变化 {
+                if 变化.拆分改变 {
+                    self.编码器.构建拆分序列(解, &mut self.拆分序列缓冲);
+                }
+            } else {
                 self.编码器.构建拆分序列(解, &mut self.拆分序列缓冲);
             }
-        } else {
-            self.编码器.构建拆分序列(解, &mut self.拆分序列缓冲);
-        }
+        });
         self.编码器
             .动态编码(解, &self.拆分序列缓冲, &mut self.编码结果缓冲);
-        let 长度分界点 = [0, 1, 2, 3, 4].map(|x| 进制.pow(x));
-        let mut 简体分级选重数 = [0; 分级数];
-        let mut 总稳健频率 = 0.0;
-        let mut 简体选重率 = 0.0;
-        let mut 繁体选重率 = 0.0;
-        let mut 繁体选重数 = 0;
-        let mut 简繁通打选重率 = 0.0;
-        let mut 稳健选重频率 = 0.0;
-        let mut 总组合当量 = 0.0;
-        let mut 总稳健组合数 = 0.0;
-        let mut 总稳健组合当量 = 0.0;
-        let mut 按键数向量 = vec![0.0; 进制 as usize];
-        let mut 码长 = 0.0;
-        let 分段函数 = vec![
-            (0, 15.),
-            (500, 10.),
-            (1500, 8.),
-            (2000, 6.),
-            (3000, 2.),
-            (4500, 1.5),
-            (6000, 1.),
-            (usize::MAX, 1.),
-        ];
-        for (序号, 编码信息) in self.编码结果缓冲.iter_mut().enumerate() {
-            if 编码信息.繁体选重 {
-                繁体选重率 += 编码信息.繁体频率;
-                繁体选重数 += 1;
-            }
-            if 编码信息.简繁通打选重 {
-                简繁通打选重率 += 编码信息.混合频率;
-            }
-            if 编码信息.简体 {
-                let 稳健频率 = 线性插值(序号, &分段函数);
-                if 编码信息.简体选重 {
-                    简体选重率 += 编码信息.简体频率;
-                    稳健选重频率 += 稳健频率;
-                    let 分级 = 分级大小.iter().position(|&x| 序号 < x).unwrap();
-                    简体分级选重数[分级] += 1;
+        let (指标, 目标函数值) = time_block!("统计", {
+            let 长度分界点 = [0, 1, 2, 3, 4].map(|x| 进制.pow(x));
+            let mut 简体分级选重数 = [0; 分级数];
+            let mut 总稳健频率 = 0.0;
+            let mut 简体选重率 = 0.0;
+            let mut 繁体选重率 = 0.0;
+            let mut 繁体选重数 = 0;
+            let mut 简繁通打选重率 = 0.0;
+            let mut 稳健选重频率 = 0.0;
+            let mut 总组合当量 = 0.0;
+            let mut 总稳健组合数 = 0.0;
+            let mut 总稳健组合当量 = 0.0;
+            let mut 按键数向量 = vec![0.0; 进制 as usize];
+            let mut 码长 = 0.0;
+            let 分段函数 = vec![
+                (0, 15.),
+                (500, 10.),
+                (1500, 8.),
+                (2000, 6.),
+                (3000, 2.),
+                (4500, 1.5),
+                (6000, 1.),
+                (usize::MAX, 1.),
+            ];
+            for (序号, 编码信息) in self.编码结果缓冲.iter_mut().enumerate() {
+                if 编码信息.繁体选重 {
+                    繁体选重率 += 编码信息.繁体频率;
+                    繁体选重数 += 1;
                 }
-                let 简码 = 编码信息.简体简码;
-                let 编码长度 = 长度分界点.iter().position(|&x| 简码 < x).unwrap();
-                总稳健频率 += 稳健频率;
-                码长 += 编码信息.简体频率 * 编码长度 as f64;
-                总组合当量 += 编码信息.简体频率 as f64 * self.当量信息[简码 as usize];
-                总稳健组合数 += 稳健频率 * (编码长度 - 1) as f64;
-                总稳健组合当量 += 稳健频率 * self.当量信息[简码 as usize];
-                let mut 剩余编码 = 简码;
-                while 剩余编码 > 0 {
-                    let 键 = 剩余编码 % 进制;
-                    按键数向量[键 as usize] += 编码信息.简体频率;
-                    剩余编码 /= 进制;
+                if 编码信息.简繁通打选重 {
+                    简繁通打选重率 += 编码信息.混合频率;
+                }
+                if 编码信息.简体 {
+                    let 稳健频率 = 线性插值(序号, &分段函数);
+                    if 编码信息.简体选重 {
+                        简体选重率 += 编码信息.简体频率;
+                        稳健选重频率 += 稳健频率;
+                        let 分级 = 分级大小.iter().position(|&x| 序号 < x).unwrap();
+                        简体分级选重数[分级] += 1;
+                    }
+                    let 简码 = 编码信息.简体简码;
+                    let 编码长度 = 长度分界点.iter().position(|&x| 简码 < x).unwrap();
+                    总稳健频率 += 稳健频率;
+                    码长 += 编码信息.简体频率 * 编码长度 as f64;
+                    总组合当量 += 编码信息.简体频率 as f64 * self.当量信息[简码 as usize];
+                    总稳健组合数 += 稳健频率 * (编码长度 - 1) as f64;
+                    总稳健组合当量 += 稳健频率 * self.当量信息[简码 as usize];
+                    let mut 剩余编码 = 简码;
+                    while 剩余编码 > 0 {
+                        let 键 = 剩余编码 % 进制;
+                        按键数向量[键 as usize] += 编码信息.简体频率;
+                        剩余编码 /= 进制;
+                    }
                 }
             }
-        }
 
-        let 字根数 = 解
-            .字根
-            .iter()
-            .filter(|&(_, x)| x != &字根安排::未选取)
-            .count();
-        let 分布: Vec<_> = 按键数向量.iter().map(|x| *x as f64 / 码长 as f64).collect();
-        let mut 按键分布偏差 = 0.0;
-        for (frequency, loss) in zip(&分布, &self.键位分布信息) {
-            let diff = frequency - loss.ideal;
-            if diff > 0.0 {
-                按键分布偏差 += loss.gt_penalty * diff;
-            } else {
-                按键分布偏差 -= loss.lt_penalty * diff;
+            let 字根数 = 解
+                .字根
+                .iter()
+                .filter(|&(_, x)| x != &字根安排::未选取)
+                .count();
+            let 分布: Vec<_> = 按键数向量.iter().map(|x| *x as f64 / 码长 as f64).collect();
+            let mut 按键分布偏差 = 0.0;
+            for (frequency, loss) in zip(&分布, &self.键位分布信息) {
+                let diff = frequency - loss.ideal;
+                if diff > 0.0 {
+                    按键分布偏差 += loss.gt_penalty * diff;
+                } else {
+                    按键分布偏差 -= loss.lt_penalty * diff;
+                }
             }
-        }
-        let mut 按键分布 = FxHashMap::default();
-        for (键, 频率) in 按键数向量.iter().enumerate() {
-            if let Some(键) = self.棱镜.数字转键.get(&(键 as u64)) {
-                按键分布.insert(*键, *频率 as f64 / 码长 as f64);
+            let mut 按键分布 = FxHashMap::default();
+            for (键, 频率) in 按键数向量.iter().enumerate() {
+                if let Some(键) = self.棱镜.数字转键.get(&(键 as u64)) {
+                    按键分布.insert(*键, *频率 as f64 / 码长 as f64);
+                }
             }
-        }
-        let 简体选重数 = 简体分级选重数.iter().sum();
-        let 简体稳健选重率 = 稳健选重频率 / 总稳健频率;
-        let 组合当量 = 总组合当量 / (码长 - 1.0);
-        let 稳健组合当量 = 总稳健组合当量 / 总稳健组合数;
-        let 指标 = 冰雪清韵指标 {
-            字根数,
-            简体选重数,
-            简体分级选重数,
-            简体选重率,
-            简体稳健选重率,
-            繁体选重数,
-            繁体选重率,
-            简繁通打选重率,
-            组合当量,
-            稳健组合当量,
-            按键分布,
-            码长,
-            按键分布偏差,
-        };
-        let 目标函数值 = 简体稳健选重率
-            + 稳健组合当量 * 0.1
-            + 按键分布偏差 * 0.01
-            + 码长 * 0.05
-            + 繁体选重率 * 0.5
-            + 简繁通打选重率 * 0.5;
+            let 简体选重数 = 简体分级选重数.iter().sum();
+            let 简体稳健选重率 = 稳健选重频率 / 总稳健频率;
+            let 组合当量 = 总组合当量 / (码长 - 1.0);
+            let 稳健组合当量 = 总稳健组合当量 / 总稳健组合数;
+            let 指标 = 冰雪清韵指标 {
+                字根数,
+                简体选重数,
+                简体分级选重数,
+                简体选重率,
+                简体稳健选重率,
+                繁体选重数,
+                繁体选重率,
+                简繁通打选重率,
+                组合当量,
+                稳健组合当量,
+                按键分布,
+                码长,
+                按键分布偏差,
+            };
+            let 目标函数值 = 简体稳健选重率
+                + 稳健组合当量 * 0.1
+                + 按键分布偏差 * 0.01
+                + 码长 * 0.05
+                + 繁体选重率 * 0.5
+                + 简繁通打选重率 * 0.5;
 
+            (指标, 目标函数值)
+        });
         if 变化.is_none() {
             self.编码结果.clone_from(&self.编码结果缓冲);
             self.拆分序列.clone_from(&self.拆分序列缓冲);

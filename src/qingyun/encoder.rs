@@ -4,9 +4,12 @@ use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{array::from_fn, cmp::Ordering, collections::BinaryHeap, iter::zip};
 
-use crate::qingyun::{
-    context::冰雪清韵上下文, 优先简码, 冰雪清韵决策, 冰雪清韵决策变化, 冰雪清韵编码信息,
-    动态拆分项, 固定拆分项, 大集合, 小集合, 最大码长, 特简码, 空格, 进制, 频率,
+use crate::{
+    qingyun::{
+        context::冰雪清韵上下文, 优先简码, 冰雪清韵决策, 冰雪清韵决策变化, 冰雪清韵编码信息,
+        动态拆分项, 固定拆分项, 大集合, 小集合, 最大码长, 特简码, 空格, 进制, 频率,
+    },
+    time_block,
 };
 
 pub struct 冰雪清韵编码器 {
@@ -629,12 +632,12 @@ impl 冰雪清韵编码器 {
         输出: &mut [冰雪清韵编码信息],
     ) {
         let 映射 = 决策.线性化(&self.棱镜);
-        self.重置空间();
-        self.输出全码(输出, &映射, 拆分序列, 决策);
-        self.输出优先简码(输出);
-        // self.输出简码(输出);
-        self.输出简码2(输出, 决策);
-        // self.输出简码3(输出, &映射);
+        time_block!("重置空间", { self.重置空间() });
+        time_block!("输出全码", {
+            self.输出全码(输出, &映射, 拆分序列, 决策)
+        });
+        time_block!("输出优先简码", { self.输出优先简码(输出) });
+        time_block!("输出简码", { self.输出简码2(输出, 决策) });
     }
 }
 
