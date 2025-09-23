@@ -1,7 +1,7 @@
 use crate::{
     qingyun::{
-        context::冰雪清韵上下文, 元素安排, 冰雪清韵决策, 冰雪清韵决策变化, 冰雪清韵决策空间,
-        大集合, 笔画,
+        context::冰雪清韵上下文, 不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策变化,
+        冰雪清韵决策空间, 大集合, 笔画,
     },
     time_block,
 };
@@ -29,8 +29,8 @@ impl 变异 for 冰雪清韵操作 {
             let 随机数: f64 = random();
             if 随机数 < 0.05 {
                 self.改变补码键(决策)
-            } else if 随机数 < 0.1 {
-                self.移动声母(决策)
+            // } else if 随机数 < 0.1 {
+            //     self.移动声母(决策)
             } else if 随机数 < 0.2 {
                 self.移动韵母(决策)
             } else {
@@ -89,7 +89,11 @@ impl 冰雪清韵操作 {
 
     fn 改变补码键(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
         let mut rng = thread_rng();
-        决策.补码键 = 大集合.into_iter().choose(&mut rng).unwrap();
+        决策.补码键 = 大集合
+            .into_iter()
+            .filter(|x| !不好的大集合键.contains(x))
+            .choose(&mut rng)
+            .unwrap();
         冰雪清韵决策变化::无变化()
     }
 

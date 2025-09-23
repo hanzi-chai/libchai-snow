@@ -1,6 +1,5 @@
 use crate::qingyun::{
-    元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息, 动态拆分项, 固定拆分项, 大集合,
-    小集合, 拆分输入, 条件, 条件元素安排, 笔画, 编码, 进制,
+    不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息, 动态拆分项, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件, 条件元素安排, 笔画, 编码, 进制, 频序, 频率
 };
 use chai::{
     config::{Condition, Mapped, ValueDescription, 配置},
@@ -13,7 +12,7 @@ use chrono::Local;
 use core::panic;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde_yaml::{from_str, to_string};
 use std::{
     fs::{File, read_to_string},
@@ -33,8 +32,8 @@ pub struct 冰雪清韵上下文 {
     pub 动态拆分: Vec<动态拆分项>,
     pub 块转数字: FxHashMap<String, usize>,
     pub 数字转块: FxHashMap<usize, String>,
+    pub 简体顺序: Vec<usize>,
     pub 繁体顺序: Vec<usize>,
-    pub 简繁通打顺序: Vec<usize>,
     pub 下游字根: FxHashMap<元素, Vec<元素>>,
 }
 
@@ -143,6 +142,7 @@ impl 冰雪清韵上下文 {
                     "声-zh" | "声-ch" | "声-sh" | "声-0" => {
                         决策空间.元素[序号] = 大集合
                             .into_iter()
+                            .filter(|&c| !不好的大集合键.contains(&c))
                             .map(|键位| 元素安排::键位(键位).into())
                             .collect();
                     }
@@ -164,6 +164,12 @@ impl 冰雪清韵上下文 {
                     match 元素.as_str() {
                         "韵-a" | "韵-e" | "韵-i" | "韵-o" | "韵-u" => {
                             决策空间.元素[序号] = vec![初始决策.元素[序号].clone().into()];
+                        }
+                        "韵-an" | "韵-en" | "韵-ang" | "韵-eng" => {
+                            决策空间.元素[序号] = [';', ',', '.', '/']
+                                .into_iter()
+                                .map(|键位| 元素安排::键位(键位).into())
+                                .collect();
                         }
                         _ => {
                             决策空间.元素[序号] = 小集合
@@ -282,7 +288,7 @@ impl 冰雪清韵上下文 {
             "初始决策中的乱序键位不完整: {所有乱序键位:?}"
         );
 
-        let (固定拆分, 动态拆分, 块转数字, 数字转块, 繁体顺序, 简繁通打顺序) =
+        let (固定拆分, 动态拆分, 块转数字, 数字转块, 简体顺序, 繁体顺序) =
             Self::解析动态拆分(&棱镜, &决策空间);
         Ok(Self {
             配置: 输入.配置,
@@ -295,8 +301,8 @@ impl 冰雪清韵上下文 {
             动态拆分,
             块转数字,
             数字转块,
+            简体顺序,
             繁体顺序,
-            简繁通打顺序,
             下游字根,
         })
     }
@@ -327,6 +333,7 @@ impl 冰雪清韵上下文 {
         let 拆分输入: 拆分输入 =
             from_str(&read_to_string("data/dynamic_analysis.yaml").unwrap()).unwrap();
         let 繁体字频: FxHashMap<char, u64> = 读取文本文件(PathBuf::from("data/ftzp.txt"));
+        let 陆标转台标: FxHashMap<char, char> = 读取文本文件(PathBuf::from("data/t2tw.txt"));
         let mut 动态拆分 = vec![];
         let mut 块转数字 = FxHashMap::default();
         let mut 数字转块 = FxHashMap::default();
@@ -364,66 +371,100 @@ impl 冰雪清韵上下文 {
             动态拆分.push(拆分方式列表);
         }
         let mut 固定拆分 = vec![];
-        let 简体总频数: u64 = 拆分输入.固定拆分.iter().map(|x| x.频率).sum();
-        let 繁体总频数: u64 = 繁体字频.values().cloned().sum();
+        let mut 简体总频数: u64 = 0;
+        let mut 繁体总频数: u64 = 0;
+        let 国字常用: FxHashSet<char> = 拆分输入
+            .固定拆分
+            .iter()
+            .filter(|x| x.国字常用)
+            .map(|x| x.汉字)
+            .collect();
         for 词 in &拆分输入.固定拆分 {
             let 字块 = Self::对齐(词.拆分.iter().map(|块| 块转数字[块]).collect(), usize::MAX);
-            let 简体频率 = 词.频率 as f64 / 简体总频数 as f64;
-            let 最高频读音 = 词.读音.iter().max_by_key(|&x| x.频率).unwrap();
-            if !棱镜.元素转数字.contains_key(&最高频读音.声)
-                || !棱镜.元素转数字.contains_key(&最高频读音.韵)
-            {
-                panic!(
-                    "固定拆分项 {} 的声韵 {}-{} 不在棱镜中",
-                    词.汉字, 最高频读音.声, 最高频读音.韵
-                );
+            let mut 简体频率 = 0.0;
+            let mut 繁体频率 = 0.0;
+            if 词.gb2312 {
+                简体频率 = 词.频率 as 频率;
+                简体总频数 += 词.频率;
             }
-            let 字 = 词.汉字.chars().next().unwrap();
-            let 繁体频率 =
-                繁体字频.get(&字).cloned().unwrap_or_default() as f64 / 繁体总频数 as f64;
-            let 混合频率 = (简体频率 + 繁体频率) / 2.0;
+            let mut 陆标 = false;
+            if 词.国字常用 {
+                繁体频率 = *繁体字频.get(&词.汉字).unwrap_or(&0) as 频率;
+                繁体总频数 += 繁体频率 as u64;
+            } else {
+                if let Some(&台标) = 陆标转台标.get(&词.汉字) {
+                    if 国字常用.contains(&台标) {
+                        繁体频率 = *繁体字频.get(&台标).unwrap_or(&0) as 频率;
+                        繁体总频数 += 繁体频率 as u64;
+                        陆标 = true;
+                    }
+                }
+            }
             固定拆分.push(固定拆分项 {
-                词: 字,
+                词: 词.汉字,
                 简体频率,
+                简体频序: 0,
                 繁体频率,
-                混合频率,
-                声韵: (
-                    棱镜.元素转数字[&最高频读音.声] as u8,
-                    棱镜.元素转数字[&最高频读音.韵] as u8,
-                ),
+                繁体频序: 0,
+                通打频率: 0.0,
                 字块,
                 通规: 词.通规,
                 gb2312: 词.gb2312,
                 国字常用: 词.国字常用,
+                陆标,
             });
         }
+        // 归一化频率
+        for 项 in &mut 固定拆分 {
+            项.简体频率 /= 简体总频数 as 频率;
+            项.繁体频率 /= 繁体总频数 as 频率;
+            项.通打频率 = (项.简体频率 + 项.繁体频率) / 2.0;
+        }
         固定拆分.sort_by(|a, b| {
-            b.gb2312
-                .cmp(&a.gb2312)
-                .then_with(|| b.简体频率.partial_cmp(&a.简体频率).unwrap())
-                .then_with(|| b.繁体频率.partial_cmp(&a.繁体频率).unwrap())
+            b.通打频率
+                .partial_cmp(&a.通打频率)
+                .unwrap()
+                .then_with(|| (b.国字常用 || b.陆标).cmp(&(a.国字常用 || a.陆标)))
+                .then_with(|| b.gb2312.cmp(&a.gb2312))
         });
+        for i in 0..常用简繁范围 {
+            assert!(
+                固定拆分[i].gb2312 || 固定拆分[i].国字常用 || 固定拆分[i].陆标,
+                "前 {} 个字中第 {} 个字既不是简体常用字也不是繁体常用字: {:?}",
+                常用简繁范围,
+                i + 1,
+                固定拆分[i]
+            );
+        }
+        for i in 常用简繁范围..固定拆分.len() {
+            assert!(
+                !固定拆分[i].gb2312 && !固定拆分[i].国字常用 && !固定拆分[i].陆标,
+                "第 {} 个字是简体或繁体常用字: {:?}",
+                i + 1,
+                固定拆分[i]
+            );
+        }
+        let 简体顺序: Vec<_> = 固定拆分
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.gb2312)
+            .sorted_by(|(_, a), (_, b)| b.简体频率.partial_cmp(&a.简体频率).unwrap())
+            .map(|(i, _)| i)
+            .collect();
         let 繁体顺序: Vec<_> = 固定拆分
             .iter()
             .enumerate()
-            .filter(|(_, x)| x.国字常用)
+            .filter(|(_, x)| x.国字常用 || x.陆标)
             .sorted_by(|(_, a), (_, b)| b.繁体频率.partial_cmp(&a.繁体频率).unwrap())
             .map(|(i, _)| i)
             .collect();
-        let 简繁通打顺序: Vec<_> = 固定拆分
-            .iter()
-            .enumerate()
-            .sorted_by(|(_, a), (_, b)| b.混合频率.partial_cmp(&a.混合频率).unwrap())
-            .map(|(i, _)| i)
-            .collect();
-        (
-            固定拆分,
-            动态拆分,
-            块转数字,
-            数字转块,
-            繁体顺序,
-            简繁通打顺序,
-        )
+        for (简体频序, 索引) in 简体顺序.iter().enumerate() {
+            固定拆分[*索引].简体频序 = 简体频序 as 频序;
+        }
+        for (繁体频序, 索引) in 繁体顺序.iter().enumerate() {
+            固定拆分[*索引].繁体频序 = 繁体频序 as 频序;
+        }
+        (固定拆分, 动态拆分, 块转数字, 数字转块, 简体顺序, 繁体顺序)
     }
 
     pub fn 生成码表(&self, 编码结果: &[冰雪清韵编码信息]) -> Vec<码表项> {
@@ -447,8 +488,8 @@ impl 冰雪清韵上下文 {
         编码结果: &[冰雪清韵编码信息],
         顺序: &Vec<usize>,
         标签: &impl Fn(&冰雪清韵编码信息) -> bool,
-        频率: &impl Fn(&冰雪清韵编码信息) -> f64,
-    ) -> Vec<(编码, Vec<char>, f64)> {
+        频率: &impl Fn(&冰雪清韵编码信息) -> 频率,
+    ) -> Vec<(编码, Vec<char>, 频率)> {
         let mut 翻转码表 = FxHashMap::default();
         let mut 重码组列表 = vec![];
         for 索引 in 顺序 {
@@ -472,14 +513,34 @@ impl 冰雪清韵上下文 {
         编码结果: &[冰雪清韵编码信息],
         路径: &PathBuf,
     ) -> Result<(), 错误> {
-        let 指法标记 = 指法标记::new();
         let mut 文件 = File::create(路径).unwrap();
+        let 简体前三千: Vec<_> = self.简体顺序.iter().take(3000).cloned().collect();
+        let 繁体前三千: Vec<_> = self.繁体顺序.iter().take(3000).cloned().collect();
+        let 通打前三千: Vec<_> = (0..3000).collect();
+        let 简体重码组列表 =
+            self.翻转码表(编码结果, &简体前三千, &|x| x.简体选重 > 0, &|x| x.简体频率);
+        let 繁体重码组列表 =
+            self.翻转码表(编码结果, &繁体前三千, &|x| x.繁体选重 > 0, &|x| x.繁体频率);
+        let 通打重码组列表 =
+            self.翻转码表(编码结果, &通打前三千, &|x| x.通打选重 > 0, &|x| x.通打频率);
+        for (label, 重码组列表) in [
+            ("简体", 简体重码组列表),
+            ("繁体", 繁体重码组列表),
+            ("通打", 通打重码组列表),
+        ] {
+            writeln!(文件, "# 前 3000 中{label}全码重码\n")?;
+            for (全码, 重码组, 次选频率) in 重码组列表 {
+                let 全码: String = self.棱镜.数字转编码(全码 as u64).iter().collect();
+                let 百万分之频率 = 次选频率 * 1_000_000.0;
+                writeln!(文件, "- {全码} {重码组:?} [{百万分之频率:.2} μ]")?;
+            }
+            writeln!(文件, "")?;
+        }
+        let 指法标记 = 指法标记::new();
         let mut 差指法 = vec![];
         let mut 四键字 = vec![];
-        let 简体前三千: Vec<_> = (0..3000).collect();
-        let 繁体前三千: Vec<_> = self.繁体顺序.iter().take(3000).cloned().collect();
-        let 简繁通打前三千: Vec<_> = self.简繁通打顺序.iter().take(3000).cloned().collect();
-        for (序号, 编码信息) in 编码结果[..3000].iter().enumerate() {
+        for 序号 in 简体前三千.into_iter() {
+            let 编码信息 = &编码结果[序号];
             let 词 = self.固定拆分[序号].词;
             let 简码 = self.棱镜.数字转编码(编码信息.简体简码 as u64);
             if 简码.len() == 4 && 序号 < 500 {
@@ -495,33 +556,6 @@ impl 冰雪清韵上下文 {
                     }
                 }
             }
-        }
-        let 简体重码组列表 =
-            self.翻转码表(编码结果, &简体前三千, &|x| x.简体选重, &|x| {
-                x.简体频率
-            });
-        let 繁体重码组列表 =
-            self.翻转码表(编码结果, &繁体前三千, &|x| x.繁体选重, &|x| {
-                x.繁体频率
-            });
-        let 简繁通打重码组列表 = self.翻转码表(
-            编码结果,
-            &简繁通打前三千,
-            &|x| x.简繁通打选重,
-            &|x| x.混合频率,
-        );
-        for (label, 重码组列表) in [
-            ("简体", 简体重码组列表),
-            ("繁体", 繁体重码组列表),
-            ("简繁通打", 简繁通打重码组列表),
-        ] {
-            writeln!(文件, "# 前 3000 中{label}全码重码\n")?;
-            for (全码, 重码组, 次选频率) in 重码组列表 {
-                let 全码: String = self.棱镜.数字转编码(全码 as u64).iter().collect();
-                let 百万分之频率 = 次选频率 * 1_000_000.0;
-                writeln!(文件, "- {全码} {重码组:?} [{百万分之频率:.2} ppm]")?;
-            }
-            writeln!(文件, "")?;
         }
         writeln!(文件, "\n# 前 1500 中简码差指法项\n")?;
         for (字, 编码) in 差指法 {

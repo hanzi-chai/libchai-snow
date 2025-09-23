@@ -25,20 +25,26 @@ pub const 特简字: [char; 8] = [' ', '的', '是', '我', '不', '了', '在',
 pub const 特简码: [char; 8] = [' ', 'e', 'i', 'o', 'u', 'a', ';', '/'];
 pub const 优先简码: [char; 10] = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 pub const 笔画: [&str; 5] = ["1", "2", "3", "4", "5"];
+pub const 不好的大集合键: [char; 5] = ['q', 'z', 'p', 'y', 'b'];
 
 pub type 编码 = u32;
-pub type 频率 = f64;
+pub type 频率 = f32;
+pub type 频序 = u32;
+pub const 所有汉字数: usize = 20992;
+pub const 常用简繁范围: usize = 8536;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct 冰雪清韵编码信息 {
     pub 简体频率: 频率,
+    pub 简体频序: 频序,
     pub 繁体频率: 频率,
-    pub 混合频率: 频率,
+    pub 繁体频序: 频序,
+    pub 通打频率: 频率,
     pub 全码: 编码,
     pub 简体简码: 编码,
-    pub 简体选重: bool,
-    pub 繁体选重: bool,
-    pub 简繁通打选重: bool,
+    pub 简体选重: u8,
+    pub 繁体选重: u8,
+    pub 通打选重: u8,
     pub 特简: u8,
     pub 完成出简: bool,
     pub 简体: bool,
@@ -52,30 +58,24 @@ pub type 动态拆分项 = Vec<[元素; 4]>;
 pub struct 固定拆分项 {
     pub 词: char,
     pub 简体频率: 频率,
+    pub 简体频序: 频序,
     pub 繁体频率: 频率,
-    pub 混合频率: 频率,
-    pub 声韵: (u8, u8),
+    pub 繁体频序: 频序,
+    pub 通打频率: 频率,
     pub 字块: [块; 4],
     pub 通规: u8,
     pub gb2312: bool,
     pub 国字常用: bool,
-}
-
-#[derive(Deserialize)]
-struct 带频读音 {
-    pub 频率: u32,
-    pub 声: String,
-    pub 韵: String,
+    pub 陆标: bool,
 }
 
 #[derive(Deserialize)]
 struct 原始固定拆分项 {
-    pub 汉字: String,
+    pub 汉字: char,
     pub 通规: u8,
     pub gb2312: bool,
     pub 国字常用: bool,
     pub 频率: u64,
-    pub 读音: Vec<带频读音>,
     pub 拆分: Vec<String>,
 }
 

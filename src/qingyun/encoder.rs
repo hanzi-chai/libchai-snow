@@ -19,14 +19,15 @@ pub struct 冰雪清韵编码器 {
     pub 块转数字: FxHashMap<String, usize>,
     pub 数字转块: FxHashMap<usize, String>,
     pub 优先简码: FxHashSet<usize>,
-    pub 简体空间: Vec<bool>,
-    pub 繁体空间: Vec<bool>,
-    pub 简繁通打空间: Vec<bool>,
+    pub 简体空间: Vec<u8>,
+    pub 繁体空间: Vec<u8>,
+    pub 通打空间: Vec<u8>,
     pub 棱镜: 棱镜,
     pub 当量信息: Vec<f64>,
     pub 全部出简: bool,
     pub 繁体顺序: Vec<usize>,
-    pub 简繁通打顺序: Vec<usize>,
+    pub 简体顺序: Vec<usize>,
+    pub 非主动出简组合: FxHashSet<u32>,
 }
 
 const 最大备选长度: usize = 12;
@@ -106,6 +107,15 @@ impl 冰雪清韵编码器 {
                 }
             })
             .collect();
+        let 非主动出简组合: FxHashSet<_> =
+            vec!["p,", "p.", "p/", "y,", "y.", "y/", "ce", "nu", "mu", "xe"]
+                .iter()
+                .map(|s| {
+                    let c1 = s.chars().next().unwrap();
+                    let c2 = s.chars().nth(1).unwrap();
+                    上下文.棱镜.键转数字[&c1] as u32 + 上下文.棱镜.键转数字[&c2] as u32 * 进制
+                })
+                .collect();
         Ok(Self {
             动态拆分: 上下文.动态拆分.clone(),
             固定拆分: 上下文.固定拆分.clone(),
@@ -113,13 +123,14 @@ impl 冰雪清韵编码器 {
             数字转块: 上下文.数字转块.clone(),
             简体空间,
             繁体空间,
-            简繁通打空间,
+            通打空间: 简繁通打空间,
             棱镜: 上下文.棱镜.clone(),
             当量信息,
             优先简码: 优先简码集合,
             全部出简,
+            简体顺序: 上下文.简体顺序.clone(),
             繁体顺序: 上下文.繁体顺序.clone(),
-            简繁通打顺序: 上下文.简繁通打顺序.clone(),
+            非主动出简组合,
         })
     }
 
@@ -127,15 +138,15 @@ impl 冰雪清韵编码器 {
         &self, 决策: &冰雪清韵决策, 拆分序列: &mut [[元素; 4]]
     ) {
         let 映射 = 决策.线性化(&self.棱镜);
-        let mut 当前拆分索引 = vec![0_usize; self.动态拆分.len()];
+        let mut 当前拆分索引 = Vec::with_capacity(self.动态拆分.len());
         for (块序号, 拆分方式列表) in self.动态拆分.iter().enumerate() {
             if 块序号 == usize::MAX {
-                continue;
+                当前拆分索引.push([0, 0, 0, 0]);
             }
             let mut 找到 = false;
-            for (拆分方式序号, 拆分方式) in 拆分方式列表.iter().enumerate() {
+            for 拆分方式 in 拆分方式列表.iter() {
                 if 拆分方式.iter().all(|x| *x == 0 || 映射[*x] != 0) {
-                    当前拆分索引[块序号] = 拆分方式序号;
+                    当前拆分索引.push(*拆分方式);
                     找到 = true;
                     break;
                 }
@@ -160,7 +171,7 @@ impl 冰雪清韵编码器 {
                 if 块序号 == usize::MAX {
                     break;
                 }
-                for 元素 in self.动态拆分[块序号][当前拆分索引[块序号]] {
+                for 元素 in 当前拆分索引[块序号] {
                     if 元素 == 0 {
                         break;
                     }
@@ -178,13 +189,13 @@ impl 冰雪清韵编码器 {
 
     pub fn 重置空间(&mut self) {
         self.简体空间.iter_mut().for_each(|x| {
-            *x = false;
+            *x = 0;
         });
         self.繁体空间.iter_mut().for_each(|x| {
-            *x = false;
+            *x = 0;
         });
-        self.简繁通打空间.iter_mut().for_each(|x| {
-            *x = false;
+        self.通打空间.iter_mut().for_each(|x| {
+            *x = 0;
         });
     }
 
@@ -213,59 +224,60 @@ impl 冰雪清韵编码器 {
         拆分序列: &[[元素; 4]],
         _决策: &冰雪清韵决策,
     ) {
-        // 生成全码并统计简体选重标记
+        // 生成全码并统计通打选重标记
         for (序列, 编码信息) in zip(拆分序列, 编码结果.iter_mut()) {
             编码信息.全码 = Self::全码规则(序列, 映射);
             // 在生成全码时，只对非字根字统计重码
-            if 编码信息.简体 {
-                if 序列[1] != 0 {
-                    编码信息.简体选重 = self.简体空间[编码信息.全码 as usize];
-                    self.简体空间[编码信息.全码 as usize] = true;
-                } else {
-                    编码信息.简体选重 = false;
-                }
+            if 编码信息.全码 < 进制 * 进制 {
+                编码信息.通打选重 = 0;
+            } else {
+                编码信息.通打选重 = self.通打空间[编码信息.全码 as usize];
+                self.通打空间[编码信息.全码 as usize] =
+                    self.通打空间[编码信息.全码 as usize].saturating_add(1);
+            }
+        }
+        // 简体选重标记
+        for 索引 in &self.简体顺序 {
+            let 编码信息 = &mut 编码结果[*索引];
+            if 编码信息.全码 < 进制 * 进制 {
+                编码信息.简体选重 = 0;
+            } else {
+                编码信息.简体选重 = self.简体空间[编码信息.全码 as usize];
+                self.简体空间[编码信息.全码 as usize] =
+                    self.简体空间[编码信息.全码 as usize].saturating_add(1);
             }
         }
         // 繁体选重标记
         for 索引 in &self.繁体顺序 {
             let 编码信息 = &mut 编码结果[*索引];
             if 编码信息.全码 < 进制 * 进制 {
-                编码信息.繁体选重 = false;
+                编码信息.繁体选重 = 0;
             } else {
                 编码信息.繁体选重 = self.繁体空间[编码信息.全码 as usize];
-                self.繁体空间[编码信息.全码 as usize] = true;
-            }
-        }
-        // 简繁通打选重标记
-        for 索引 in &self.简繁通打顺序 {
-            let 编码信息 = &mut 编码结果[*索引];
-            if 编码信息.全码 < 进制 * 进制 {
-                编码信息.简繁通打选重 = false;
-            } else {
-                编码信息.简繁通打选重 = self.简繁通打空间[编码信息.全码 as usize];
-                self.简繁通打空间[编码信息.全码 as usize] = true;
+                self.繁体空间[编码信息.全码 as usize] =
+                    self.繁体空间[编码信息.全码 as usize].saturating_add(1);
             }
         }
     }
 
     fn 输出优先简码(&mut self, 编码结果: &mut [冰雪清韵编码信息]) {
         // 输出优先字根
-        for 序号 in self.优先简码.iter() {
+        for 序号 in &self.优先简码 {
             let 编码信息 = &mut 编码结果[*序号];
             // 特简码
             编码信息.简体简码 = 编码信息.全码;
             编码信息.完成出简 = true;
-            if self.简体空间[编码信息.全码 as usize] {
-                编码信息.简体选重 = true;
-            }
-            self.简体空间[编码信息.全码 as usize] = true;
+            编码信息.简体选重 = self.简体空间[编码信息.全码 as usize];
+            self.简体空间[编码信息.全码 as usize] =
+                self.简体空间[编码信息.全码 as usize].saturating_add(1);
         }
         const 字根字优先位置: usize = 1000;
         // 让前 1000 的字根占据两键字的位置
-        for (序号, 编码信息) in 编码结果.iter_mut().enumerate() {
-            if 序号 >= 字根字优先位置 {
+        for 序号 in &self.简体顺序 {
+            if *序号 >= 字根字优先位置 {
                 break;
             }
+            let 编码信息 = &mut 编码结果[*序号];
             // 特简码
             if 编码信息.特简 > 0 {
                 编码信息.简体简码 = self.棱镜.键转数字[&特简码[编码信息.特简 as usize]] as u32;
@@ -274,35 +286,27 @@ impl 冰雪清韵编码器 {
             }
             // 二码字根字
             if 编码信息.全码 < 进制 * 进制 {
-                if !self.简体空间[编码信息.全码 as usize] {
+                if self.简体空间[编码信息.全码 as usize] == 0 {
                     编码信息.简体简码 = 编码信息.全码;
                     编码信息.完成出简 = true;
-                    self.简体空间[编码信息.全码 as usize] = true;
+                    self.简体空间[编码信息.全码 as usize] = 1;
                 }
                 continue;
             }
         }
     }
 
-    fn 输出简码2(
+    fn 输出简码(
         &mut self, 编码结果: &mut [冰雪清韵编码信息], 决策: &冰雪清韵决策
     ) {
         let mut 字根字队列 = vec![];
-        let 不太好的组合: FxHashSet<_> = vec!["p,", "p.", "p/", "y,", "y.", "y/", "ce", "nu", "mu", "xe"]
-            .iter()
-            .map(|s| {
-                let c1 = s.chars().next().unwrap();
-                let c2 = s.chars().nth(1).unwrap();
-                self.棱镜.键转数字[&c1] as u32 + self.棱镜.键转数字[&c2] as u32 * 进制
-            })
-            .collect();
         let mut 子问题列表: Vec<_> = 大集合
             .map(|c| {
                 let 第一码 = self.棱镜.键转数字[&c] as u32;
                 let 一简十重: Vec<_> = 小集合
                     .map(|x| 第一码 + self.棱镜.键转数字[&x] as u32 * 进制)
                     .into_iter()
-                    .filter(|一级简码| !不太好的组合.contains(一级简码))
+                    .filter(|一级简码| !self.非主动出简组合.contains(一级简码))
                     .sorted_by(|&x, &y| {
                         self.当量信息[x as usize]
                             .partial_cmp(&self.当量信息[y as usize])
@@ -332,10 +336,8 @@ impl 冰雪清韵编码器 {
             .into_iter()
             .collect();
         const 声码位移: usize = 1;
-        for (序号, 编码信息) in 编码结果.iter_mut().enumerate() {
-            if !编码信息.简体 {
-                continue;
-            }
+        for 序号 in &self.简体顺序 {
+            let 编码信息 = &mut 编码结果[*序号];
             // 跳过已经处理的优先简码
             if 编码信息.完成出简 {
                 编码信息.完成出简 = false;
@@ -348,18 +350,18 @@ impl 冰雪清韵编码器 {
                 continue;
             } else if 编码信息.全码 < 进制 * 进制 {
                 // 字根字
-                字根字队列.push(序号);
+                字根字队列.push(*序号);
             } else if 编码信息.全码 < 进制 * 进制 * 进制 {
                 // 二根字
                 let 第一码 = (编码信息.全码 % 进制) as usize - 声码位移;
                 子问题列表[第一码]
                     .三码全码队列
-                    .入队(序号, 编码信息.简体频率);
+                    .入队(*序号, 编码信息.简体频率);
             } else if 编码信息.全码 < 进制 * 进制 * 进制 * 进制 {
                 // 三根以上字
                 let 第一码 = (编码信息.全码 % 进制) as usize - 声码位移;
                 let 第二码 = ((编码信息.全码 / 进制) % 进制) as usize - 声码位移;
-                子问题列表[第一码].四码全码队列[第二码].入队(序号, 编码信息.简体频率);
+                子问题列表[第一码].四码全码队列[第二码].入队(*序号, 编码信息.简体频率);
             }
             编码信息.简体简码 = 编码信息.全码;
         }
@@ -376,25 +378,22 @@ impl 冰雪清韵编码器 {
                     + 编码信息.全码 * 进制 * 进制;
                 编码信息.简体简码 = 补二码;
                 编码信息.全码 = 补二码;
-                if self.简体空间[补二码 as usize] {
-                    编码信息.简体选重 = true;
-                }
-                self.简体空间[补二码 as usize] = true;
+                编码信息.简体选重 = self.简体空间[补二码 as usize];
+                self.简体空间[补二码 as usize] = self.简体空间[补二码 as usize].saturating_add(1);
             } else {
                 // 通规字可以是 ab 或 ?ab
-                if !self.简体空间[编码信息.全码 as usize] {
+                if self.简体空间[编码信息.全码 as usize] == 0 {
                     // ab
                     编码信息.简体简码 = 编码信息.全码;
-                    self.简体空间[编码信息.全码 as usize] = true;
+                    self.简体空间[编码信息.全码 as usize] = 1;
                 } else {
                     // ?ab
                     let 补一码 = self.棱镜.键转数字[&决策.补码键] as u32 + 编码信息.全码 * 进制;
                     编码信息.简体简码 = 补一码;
                     编码信息.全码 = 补一码;
-                    if self.简体空间[补一码 as usize] {
-                        编码信息.简体选重 = true;
-                    }
-                    self.简体空间[补一码 as usize] = true;
+                    编码信息.简体选重 = self.简体空间[补一码 as usize];
+                    self.简体空间[补一码 as usize] =
+                        self.简体空间[补一码 as usize].saturating_add(1);
                 }
             }
         }
@@ -410,7 +409,7 @@ impl 冰雪清韵编码器 {
             let mut 队列 = 总队列.pop().unwrap();
             let (序号, _) = 队列.出队();
             编码结果[序号].简体简码 = 一级简码;
-            self.简体空间[一级简码 as usize] = true;
+            self.简体空间[一级简码 as usize] = 1;
             总队列.push(队列);
         }
         // 输出二级简码
@@ -419,7 +418,7 @@ impl 冰雪清韵编码器 {
                 let (序号, _) = 队列.数据[队列.当前索引];
                 if 序号 != 0 {
                     编码结果[序号].简体简码 = 队列.二简;
-                    self.简体空间[队列.二简 as usize] = true;
+                    self.简体空间[队列.二简 as usize] = 1;
                 }
             }
         }
@@ -437,7 +436,7 @@ impl 冰雪清韵编码器 {
             self.输出全码(输出, &映射, 拆分序列, 决策)
         });
         time_block!("输出优先简码", { self.输出优先简码(输出) });
-        time_block!("输出简码", { self.输出简码2(输出, 决策) });
+        time_block!("输出简码", { self.输出简码(输出, 决策) });
     }
 }
 

@@ -2,14 +2,32 @@ import { parse } from "csv-parse/sync";
 import { readFileSync, writeFileSync } from "fs";
 
 const 码表: Record<string, string>[] = parse(
-  readFileSync("/Users/tansongchen/Public/libchai-snow/output-08-09+12_34_55/8/编码.txt", "utf8"),
+  readFileSync("output-09-19+22_07_19/2/编码.txt", "utf8"),
   {
     columns: ["字", "全码", "全码顺序", "简码", "简码顺序"],
     delimiter: "\t",
   }
 );
+writeFileSync(
+  "data/box.txt",
+  码表.map((x) => `${x.字}\t${x.简码.replace("_", " ")}`).join("\n")
+);
+
+const 宇浩码表: [string, string][] = [];
+
+for (const 码 of 码表) {
+  宇浩码表.push([码.字, 码.全码]);
+  if (码.简码 == "") continue;
+  宇浩码表.push([码.字, 码.简码]);
+}
+
+writeFileSync(
+  "data/ceping.txt",
+  宇浩码表.map((x) => `${x[0]}\t${x[1]}`).join("\n")
+);
+
 const 拆分表: Record<string, string>[] = parse(
-  readFileSync("debug/拆分结果.txt", "utf8"),
+  readFileSync("data/拆分结果.txt", "utf8"),
   {
     columns: ["字", "拆分序列"],
     delimiter: "\t",
@@ -18,6 +36,7 @@ const 拆分表: Record<string, string>[] = parse(
 
 const 大竹码表: [string, string][] = [];
 for (const 码 of 码表) {
+  if (码.简码 == "") continue;
   大竹码表.push([码.简码, 码.字]);
 }
 for (const 码 of 码表) {
@@ -29,13 +48,7 @@ for (const 拆分 of 拆分表) {
 }
 
 writeFileSync(
-  "debug/dazhu.txt",
+  "data/dazhu.txt",
   大竹码表.map((x) => `${x[0]}\t${x[1]}`).join("\n"),
-  "utf8"
-);
-
-writeFileSync(
-  "debug/box.txt",
-  码表.map((x) => `${x.字}\t${x.简码.replace("_", " ")}`).join("\n"),
   "utf8"
 );
