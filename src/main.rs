@@ -9,7 +9,6 @@ use snow::qingyun::context::冰雪清韵上下文;
 use snow::qingyun::encoder::冰雪清韵编码器;
 use snow::qingyun::objective::冰雪清韵目标函数;
 use snow::qingyun::operators::冰雪清韵操作;
-use snow::TIMER;
 use std::fs::File;
 use std::io::Write;
 use std::thread::spawn;
@@ -22,7 +21,7 @@ fn main() -> Result<(), 错误> {
     let _config = 上下文.配置.clone();
     match 命令行.参数.command {
         命令::Encode => {
-            let 编码器 = 冰雪清韵编码器::新建(&上下文, true)?;
+            let 编码器 = 冰雪清韵编码器::新建(&上下文, false)?;
             let mut 目标函数 = 冰雪清韵目标函数::新建(&上下文, 编码器);
             let (指标, 分数) = 目标函数.计算(&上下文.初始决策, &None);
             println!("分数：{分数:.4}");
@@ -50,6 +49,8 @@ fn main() -> Result<(), 错误> {
                         &上下文,
                         &子命令行,
                     );
+                    let 编码器 = 冰雪清韵编码器::新建(&上下文, true).unwrap();
+                    let mut 目标函数 = 冰雪清韵目标函数::新建(&上下文, 编码器);
                     目标函数.计算(&优化结果.映射, &None);
                     let 码表 = 上下文.生成码表(&目标函数.编码结果);
                     let 分析路径 = 子命令行.输出目录.join("分析.md");
@@ -78,7 +79,6 @@ fn main() -> Result<(), 错误> {
                     线程序号, 优化结果.分数, 优化结果.指标
                 )?;
             }
-            TIMER.report();
         }
     }
     Ok(())

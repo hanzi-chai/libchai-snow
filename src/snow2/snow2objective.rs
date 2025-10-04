@@ -412,9 +412,4 @@ impl 目标函数 for 冰雪二拼目标函数 {
             + 指标.字根数 as f64 * 0.0004;
         return (指标, 损失函数);
     }
-
-    fn 接受新解(&mut self) {
-        self.缓存.clone_from(&self.缓存缓冲);
-        self.编码结果.clone_from(&self.编码结果缓冲);
-    }
 }

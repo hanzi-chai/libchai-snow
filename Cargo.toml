@@ -7,8 +7,10 @@ edition = "2024"
 opt-level = 3
 
 [profile.bench]
-opt-level = 2
+opt-level = 3
 debug = true
+lto = "thin"
+codegen-units = 1
 
 [dependencies]
 chrono = "0.4.41"
@@ -23,3 +25,6 @@ rustc-hash = "2.1.1"
 serde = "1.0.219"
 serde_yaml = "0.9.34"
 unicode-width = "0.2.1"
+
+[dev-dependencies]
+criterion = "0.7.0"

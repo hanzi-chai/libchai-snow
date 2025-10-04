@@ -21,11 +21,21 @@ pub const 一码掩码: 编码 = 31;
 pub const 二码掩码: 编码 = 1023;
 pub const 三码掩码: 编码 = 32767;
 pub const 空格: 编码 = 22;
-pub const 特简字: [char; 8] = [' ', '的', '是', '我', '不', '了', '在', '和'];
-pub const 特简码: [char; 8] = [' ', 'e', 'i', 'o', 'u', 'a', ';', '/'];
-pub const 优先简码: [char; 10] = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
-pub const 笔画: [&str; 5] = ["1", "2", "3", "4", "5"];
+pub const 特简码: [(char, char); 7] = [
+    ('的', 'e'),
+    ('是', 'i'),
+    ('我', 'o'),
+    ('不', 'u'),
+    ('了', 'a'),
+    ('在', ';'),
+    ('和', '/'),
+];
+pub const 数字字根: [char; 10] = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+pub const 笔画: [&str; 6] = ["1", "2", "3", "4", "5", "6"];
+pub const 左手大码: [char; 13] = ['q', 'w', 'r', 't', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
+pub const 右手大码: [char; 8] = ['y', 'p', 'h', 'j', 'k', 'l', 'n', 'm'];
 pub const 不好的大集合键: [char; 5] = ['q', 'z', 'p', 'y', 'b'];
+pub const 主根小码: [char; 5] = ['a', 'o', 'e', 'i', 'u'];
 
 pub type 编码 = u32;
 pub type 频率 = f32;
@@ -36,8 +46,10 @@ pub const 常用简繁范围: usize = 8536;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct 冰雪清韵编码信息 {
     pub 简体频率: 频率,
+    pub 简体指数频率: 频率,
     pub 简体频序: 频序,
     pub 繁体频率: 频率,
+    pub 繁体指数频率: 频率,
     pub 繁体频序: 频序,
     pub 通打频率: 频率,
     pub 全码: 编码,
@@ -45,7 +57,6 @@ pub struct 冰雪清韵编码信息 {
     pub 简体选重: u8,
     pub 繁体选重: u8,
     pub 通打选重: u8,
-    pub 特简: u8,
     pub 完成出简: bool,
     pub 简体: bool,
     pub 繁体: bool,
@@ -92,11 +103,17 @@ struct 拆分输入 {
 pub struct 冰雪清韵决策 {
     pub 元素: Vec<元素安排>,
     pub 补码键: char,
+    pub 第一主根: char,
+    pub 第二主根: char,
 }
 
 impl 冰雪清韵决策 {
     pub fn 线性化(&self, 棱镜: &棱镜) -> Vec<编码> {
         let mut 映射 = vec![0_u32; self.元素.len()];
+        let 第一主根左手小码 = 棱镜.键转数字[&'e'] as u32;
+        let 第一主根右手小码 = 棱镜.键转数字[&'i'] as u32;
+        let 第二主根左手小码 = 棱镜.键转数字[&'a'] as u32;
+        let 第二主根右手小码 = 棱镜.键转数字[&'o'] as u32;
         for (元素, 安排) in self.元素.iter().enumerate() {
             match 安排 {
                 元素安排::未选取 => {}
@@ -106,8 +123,21 @@ impl 冰雪清韵决策 {
                 元素安排::归并(元素1) => {
                     映射[元素] = 映射[*元素1];
                 }
-                元素安排::键位韵母 { 键位, 韵母 } => {
-                    映射[元素] = 棱镜.键转数字[键位] as u32 + 映射[*韵母] * 进制;
+                元素安排::键位第一(键位) => {
+                    let 小码 = if 左手大码.contains(键位) {
+                        第一主根右手小码
+                    } else {
+                        第一主根左手小码
+                    };
+                    映射[元素] = 棱镜.键转数字[键位] as u32 + 小码 * 进制;
+                }
+                元素安排::键位第二(键位) => {
+                    let 小码 = if 左手大码.contains(键位) {
+                        第二主根右手小码
+                    } else {
+                        第二主根左手小码
+                    };
+                    映射[元素] = 棱镜.键转数字[键位] as u32 + 小码 * 进制;
                 }
                 元素安排::归并韵母 { 字根, 韵母 } => {
                     映射[元素] = 映射[*字根] % 进制 + 映射[*韵母] * 进制;
@@ -129,14 +159,15 @@ impl 冰雪清韵决策 {
         return true;
     }
 
-    fn 打印(&self, 棱镜: &棱镜) {
+    fn _打印(&self, 棱镜: &棱镜) {
         for (元素, 安排) in self.元素.iter().enumerate() {
             if 元素 > 0 {
-                println!("元素 {}: {:?}", 棱镜.数字转元素[&元素], 安排);
+                println!("元素 {:?}: {:?}", 棱镜.数字转元素[&元素], 安排);
             }
         }
     }
 }
+
 #[derive(Debug, Clone)]
 pub struct 冰雪清韵决策空间 {
     pub 元素: Vec<Vec<条件元素安排>>,
@@ -151,7 +182,8 @@ pub enum 元素安排 {
     未选取,
     键位(char),
     归并(元素),
-    键位韵母 { 键位: char, 韵母: 元素 },
+    键位第一(char),
+    键位第二(char),
     归并韵母 { 字根: 元素, 韵母: 元素 },
     声母韵母 { 声母: 元素, 韵母: 元素 },
 }
@@ -160,6 +192,7 @@ pub enum 元素安排 {
 pub struct 条件元素安排 {
     pub 安排: 元素安排,
     pub 条件列表: Vec<条件>,
+    pub 打分: f64,
 }
 
 impl From<元素安排> for 条件元素安排 {
@@ -167,6 +200,7 @@ impl From<元素安排> for 条件元素安排 {
         条件元素安排 {
             安排,
             条件列表: vec![],
+            打分: 0.0,
         }
     }
 }
@@ -186,32 +220,38 @@ impl 元素安排 {
             Mapped::Advanced(keys) => {
                 let first = keys[0].clone();
                 let MappedKey::Reference {
-                    element: 韵母, ..
+                    element: element1, ..
                 } = keys[1].clone()
                 else {
                     unreachable!();
                 };
                 match first {
-                    MappedKey::Ascii(key) => 元素安排::键位韵母 {
-                        键位: key,
-                        韵母: 棱镜.元素转数字[&韵母],
-                    },
+                    MappedKey::Ascii(key) => {
+                        if element1 == "主根-1" {
+                            元素安排::键位第一(key)
+                        } else {
+                            元素安排::键位第二(key)
+                        }
+                    }
                     MappedKey::Reference { element, .. } => {
                         if element.starts_with("声") {
                             元素安排::声母韵母 {
                                 声母: 棱镜.元素转数字[&element],
-                                韵母: 棱镜.元素转数字[&韵母],
+                                韵母: 棱镜.元素转数字[&element1],
                             }
                         } else {
                             元素安排::归并韵母 {
                                 字根: 棱镜.元素转数字[&element],
-                                韵母: 棱镜.元素转数字[&韵母],
+                                韵母: 棱镜.元素转数字[&element1],
                             }
                         }
                     }
                 }
             }
-            _ => unreachable!(),
+            _ => {
+                println!("无法从映射中恢复元素安排: {:?}", mapped);
+                unreachable!()
+            }
         }
     }
 
@@ -232,10 +272,17 @@ impl 元素安排 {
                     index: 0,
                 },
             ]),
-            元素安排::键位韵母 { 键位, 韵母 } => Mapped::Advanced(vec![
+            元素安排::键位第一(键位) => Mapped::Advanced(vec![
                 MappedKey::Ascii(*键位),
                 MappedKey::Reference {
-                    element: 棱镜.数字转元素[&韵母].clone(),
+                    element: "主根-1".to_string(),
+                    index: 0,
+                },
+            ]),
+            元素安排::键位第二(键位) => Mapped::Advanced(vec![
+                MappedKey::Ascii(*键位),
+                MappedKey::Reference {
+                    element: "主根-2".to_string(),
                     index: 0,
                 },
             ]),
@@ -255,38 +302,80 @@ impl 元素安排 {
 
 #[derive(Debug, Clone)]
 pub struct 冰雪清韵决策变化 {
-    pub 变化元素: Vec<元素>,
-    pub 拆分改变: bool,
+    pub 移动字根: Vec<元素>,
+    pub 增加字根: Vec<元素>,
+    pub 减少字根: Vec<元素>,
 }
 
 impl 冰雪清韵决策变化 {
     pub fn 无变化() -> Self {
         冰雪清韵决策变化 {
-            变化元素: vec![],
-            拆分改变: false,
+            移动字根: vec![],
+            增加字根: vec![],
+            减少字根: vec![],
         }
     }
 
-    pub fn 新建(变化元素: Vec<元素>, 拆分改变: bool) -> Self {
+    pub fn 新建(移动字根: Vec<元素>, 增加字根: Vec<元素>, 减少字根: Vec<元素>) -> Self {
         冰雪清韵决策变化 {
-            变化元素, 拆分改变
+            移动字根,
+            增加字根,
+            减少字根,
         }
     }
 }
 
 impl 解特征 for 冰雪清韵决策 {
     type 变化 = 冰雪清韵决策变化;
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct 规则输入 {
-    pub 元素: String,
-    pub 规则: Vec<元素安排>,
-    pub 允许乱序: Option<bool>,
+    fn 单位元() -> Self::变化 {
+        冰雪清韵决策变化::无变化()
+    }
+
+    fn 除法(旧变化: &Self::变化, 新变化: &Self::变化) -> Self::变化 {
+        let mut 移动字根 = 旧变化.移动字根.clone();
+        let mut 增加字根 = 旧变化.减少字根.clone();
+        let mut 减少字根 = 旧变化.增加字根.clone();
+        for 元素 in &新变化.移动字根 {
+            if !移动字根.contains(元素) {
+                移动字根.push(*元素);
+            }
+        }
+        for 元素 in &新变化.增加字根 {
+            if !增加字根.contains(元素) {
+                增加字根.push(*元素);
+            }
+        }
+        for 元素 in &新变化.减少字根 {
+            if !减少字根.contains(元素) {
+                减少字根.push(*元素);
+            }
+        }
+        冰雪清韵决策变化 {
+            移动字根,
+            增加字根,
+            减少字根,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct 分析结果 {
     pub 重码项: Vec<(String, (Vec<String>, u64))>,
     pub 差指法: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct 原始音节信息 {
+    pub 拼音: String,
+    pub 声母: String,
+    pub 韵母: String,
+    pub 频率: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct 音节信息 {
+    pub 声母: 元素,
+    pub 韵母: 元素,
+    pub 频率: 频率,
 }

@@ -1,5 +1,7 @@
 use crate::qingyun::{
-    不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息, 动态拆分项, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件, 条件元素安排, 笔画, 编码, 进制, 频序, 频率
+    不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息, 动态拆分项,
+    原始音节信息, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件, 条件元素安排, 笔画,
+    编码, 进制, 音节信息, 频序, 频率,
 };
 use chai::{
     config::{Condition, Mapped, ValueDescription, 配置},
@@ -35,6 +37,7 @@ pub struct 冰雪清韵上下文 {
     pub 简体顺序: Vec<usize>,
     pub 繁体顺序: Vec<usize>,
     pub 下游字根: FxHashMap<元素, Vec<元素>>,
+    pub 拼音: Vec<音节信息>,
 }
 
 impl 上下文 for 冰雪清韵上下文 {
@@ -45,6 +48,9 @@ impl 上下文 for 冰雪清韵上下文 {
         新配置.info.as_mut().unwrap().version =
             Some(format!("{}", Local::now().format("%Y-%m-%d+%H:%M:%S")));
         let mut mapping = IndexMap::new();
+        mapping.insert("补码-1".into(), Mapped::Basic(解.补码键.into()));
+        mapping.insert("主根-1".into(), Mapped::Basic(解.第一主根.into()));
+        mapping.insert("主根-2".into(), Mapped::Basic(解.第二主根.into()));
         for (元素, 安排) in 解.元素.iter().enumerate() {
             let mapped: Mapped = 安排.to_mapped(&self.棱镜);
             if mapped != Mapped::Unused(()) {
@@ -73,10 +79,10 @@ impl 冰雪清韵上下文 {
             ("声-p", "韵-ie"),
             ("声-d", "韵-ian"),
             ("声-zh", "韵-e"),
+            ("声-zh", "韵-e"),
         ];
         for (笔, (声母, 韵母)) in 笔画.into_iter().zip(笔画读音) {
             let 笔画数字 = 棱镜.元素转数字[笔];
-            println!("为笔画 {}（{笔画数字}）采用读音 {} {}", 笔, 声母, 韵母);
             决策.元素[笔画数字] = 元素安排::声母韵母 {
                 声母: 棱镜.元素转数字[声母],
                 韵母: 棱镜.元素转数字[韵母],
@@ -89,7 +95,7 @@ impl 冰雪清韵上下文 {
         let 原始决策 = 布局.mapping;
         let 原始决策空间 = 布局.mapping_space.unwrap();
         let 原始乱序生成器 = 布局.mapping_generator.unwrap();
-        let 原始乱序生成器 = 原始乱序生成器[原始乱序生成器.len() - 1].clone();
+        let 原始乱序生成器 = 原始乱序生成器[0].clone();
         let mut 元素转数字 = FxHashMap::default();
         let mut 数字转元素 = FxHashMap::default();
         let mut 键转数字 = FxHashMap::default();
@@ -124,13 +130,27 @@ impl 冰雪清韵上下文 {
             韵母: vec![],
             字根: vec![],
         };
+        let Mapped::Basic(补码键) = 原始决策["补码-1"].clone() else {
+            panic!("补码键必须指定");
+        };
+        let Mapped::Basic(第一主根) = 原始决策["主根-1"].clone() else {
+            panic!("第一主根必须指定");
+        };
+        let Mapped::Basic(第二主根) = 原始决策["主根-2"].clone() else {
+            panic!("第二主根必须指定");
+        };
         let mut 初始决策 = 冰雪清韵决策 {
             元素: vec![元素安排::未选取; 最大数量],
-            补码键: 'y',
+            补码键: 补码键.chars().next().unwrap(),
+            第一主根: 第一主根.chars().next().unwrap(),
+            第二主根: 第二主根.chars().next().unwrap(),
         };
         for 元素 in &所有元素 {
             let 序号 = 棱镜.元素转数字[元素];
             let 编码 = 原始决策.get(元素).unwrap_or(&Mapped::Unused(()));
+            if ["补码-1", "主根-1", "主根-2"].contains(&元素.as_str()) {
+                continue;
+            }
             if 元素.starts_with("声") {
                 决策空间.声母.push(序号);
                 let Mapped::Basic(编码) = 编码 else {
@@ -161,6 +181,12 @@ impl 冰雪清韵上下文 {
                     };
                     let 键位 = 编码.chars().next().unwrap();
                     初始决策.元素[序号] = 元素安排::键位(键位);
+                    let 鼓励归并 = [
+                        ("韵-ai", 'i'),
+                        ("韵-ei", 'a'),
+                        ("韵-ou", 'o'),
+                        ("韵-ü", 'u'),
+                    ];
                     match 元素.as_str() {
                         "韵-a" | "韵-e" | "韵-i" | "韵-o" | "韵-u" => {
                             决策空间.元素[序号] = vec![初始决策.元素[序号].clone().into()];
@@ -172,10 +198,22 @@ impl 冰雪清韵上下文 {
                                 .collect();
                         }
                         _ => {
-                            决策空间.元素[序号] = 小集合
+                            决策空间.元素[序号] = ['a', 'e', 'i', 'o', 'u']
                                 .into_iter()
-                                .filter(|&c| c != '_')
-                                .map(|键位| 元素安排::键位(键位).into())
+                                .map(|键位| {
+                                    if 鼓励归并
+                                        .iter()
+                                        .any(|&(韵, 鼓励键)| 元素 == 韵 && 鼓励键 == 键位)
+                                    {
+                                        条件元素安排 {
+                                            安排: 元素安排::键位(键位),
+                                            条件列表: vec![],
+                                            打分: -1.0,
+                                        }
+                                    } else {
+                                        元素安排::键位(键位).into()
+                                    }
+                                })
                                 .collect();
                         }
                     }
@@ -232,33 +270,45 @@ impl 冰雪清韵上下文 {
                     let 条件字根安排 = 条件元素安排 {
                         安排: 字根安排,
                         条件列表,
+                        打分: 原始安排.score,
                     };
                     安排列表.push(条件字根安排);
                 }
-                if 原始乱序生成器.elements.contains(&元素) {
-                    let 韵母列表: Vec<_> = 安排列表
-                        .iter()
-                        .filter_map(|x| {
-                            if let 元素安排::声母韵母 { 韵母, .. } = &x.安排 {
-                                Some((*韵母, x.条件列表.clone()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                // 第一主根
+                if 笔画.contains(&元素.as_str()) {
                     for 键位 in 大集合 {
-                        for (韵母, 条件) in &韵母列表 {
-                            let 安排 = 元素安排::键位韵母 {
-                                键位, 韵母: *韵母
-                            };
-                            if 安排列表.iter().any(|x| x.安排 == 安排) {
-                                continue;
-                            }
-                            安排列表.push(条件元素安排 {
-                                安排,
-                                条件列表: 条件.clone(),
-                            });
+                        let 安排 = 元素安排::键位第一(键位);
+                        if 安排列表.iter().any(|x| x.安排 == 安排) {
+                            continue;
                         }
+                        if 元素 == "1" && !['d', 'f', 'j', 'k'].contains(&键位) {
+                            continue;
+                        }
+                        安排列表.push(条件元素安排 {
+                            安排,
+                            条件列表: vec![],
+                            打分: 0.0,
+                        });
+                    }
+                }
+                // 第二主根
+                if 原始乱序生成器.elements.contains(&元素) {
+                    let 条件列表 = 安排列表
+                        .iter()
+                        .find(|x| matches!(x.安排, 元素安排::声母韵母 { .. }))
+                        .map(|x| &x.条件列表)
+                        .unwrap_or(&vec![])
+                        .clone();
+                    for 键位 in 大集合 {
+                        let 安排 = 元素安排::键位第二(键位);
+                        if 安排列表.iter().any(|x| x.安排 == 安排) {
+                            continue;
+                        }
+                        安排列表.push(条件元素安排 {
+                            安排,
+                            条件列表: 条件列表.clone(),
+                            打分: 0.0,
+                        });
                     }
                 }
                 let 安排列表: Vec<_> = 安排列表.into_iter().collect();
@@ -267,29 +317,27 @@ impl 冰雪清韵上下文 {
             }
         }
 
-        // Self::采用冰雪四拼声母布局(&mut 初始决策);
-        // Self::_采用有理笔画(&mut 初始决策, &棱镜);
-
-        let mut 所有乱序键位: Vec<_> = 初始决策
-            .元素
-            .iter()
-            .enumerate()
-            .filter_map(|(_, 安排)| {
-                if let 元素安排::键位韵母 { 键位, .. } = 安排 {
-                    Some(*键位)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        所有乱序键位.sort();
+        let mut 所有第一主根键位 = vec![];
+        let mut 所有第二主根键位 = vec![];
+        for 安排 in 初始决策.元素.iter() {
+            if let 元素安排::键位第一(键位) = 安排 {
+                所有第一主根键位.push(*键位);
+            } else if let 元素安排::键位第二(键位) = 安排 {
+                所有第二主根键位.push(*键位);
+            }
+        }
         assert!(
-            所有乱序键位.len() == 26 && 大集合.iter().all(|c| 所有乱序键位.contains(&c)),
-            "初始决策中的乱序键位不完整: {所有乱序键位:?}"
+            所有第一主根键位.len() == 6,
+            "初始决策中的乱序键位不完整: {所有第一主根键位:?}"
+        );
+        assert!(
+            所有第二主根键位.len() == 21 && 大集合.iter().all(|c| 所有第二主根键位.contains(&c)),
+            "初始决策中的乱序键位不完整: {所有第二主根键位:?}"
         );
 
         let (固定拆分, 动态拆分, 块转数字, 数字转块, 简体顺序, 繁体顺序) =
             Self::解析动态拆分(&棱镜, &决策空间);
+        let 拼音 = Self::读取拼音(&棱镜);
         Ok(Self {
             配置: 输入.配置,
             棱镜,
@@ -304,7 +352,39 @@ impl 冰雪清韵上下文 {
             简体顺序,
             繁体顺序,
             下游字根,
+            拼音,
         })
+    }
+
+    fn 读取拼音(棱镜: &棱镜) -> Vec<音节信息> {
+        let 原始拼音: Vec<原始音节信息> = 读取文本文件("data/pinyin.txt".into());
+        let mut 拼音 = Vec::new();
+        for 原始音节信息 {
+            声母, 韵母, 频率,
+        ..
+        } in &原始拼音
+        {
+            let 声母 = format!("声-{声母}");
+            let 韵母 = format!("韵-{韵母}");
+            if !棱镜.元素转数字.contains_key(&声母) {
+                panic!("拼音声母 {} 不在棱镜中", 声母);
+            }
+            if !棱镜.元素转数字.contains_key(&韵母) {
+                panic!("拼音韵母 {} 不在棱镜中", 韵母);
+            }
+            let 声母 = 棱镜.元素转数字[&声母];
+            let 韵母 = 棱镜.元素转数字[&韵母];
+            拼音.push(音节信息 {
+                声母,
+                韵母,
+                频率: *频率 as 频率,
+            });
+        }
+        let 总频率: 频率 = 拼音.iter().map(|x| x.频率).sum();
+        for 音节 in &mut 拼音 {
+            音节.频率 /= 总频率;
+        }
+        拼音
     }
 
     fn 对齐(列表: Vec<元素>, 默认值: 元素) -> [元素; 4] {
