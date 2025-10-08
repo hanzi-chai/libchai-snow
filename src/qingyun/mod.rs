@@ -15,12 +15,8 @@ pub const 大集合: [char; 21] = [
     'y', 'v',
 ];
 pub const 小集合: [char; 10] = ['_', 'e', 'i', 'o', 'u', 'a', ';', '/', ',', '.'];
-pub const 最大码长: u64 = 4;
-pub const 进制: 编码 = 32;
-pub const 一码掩码: 编码 = 31;
-pub const 二码掩码: 编码 = 1023;
-pub const 三码掩码: 编码 = 32767;
-pub const 空格: 编码 = 22;
+pub const 进制: 键 = 32;
+pub const 空格: 键 = 22;
 pub const 特简码: [(char, char); 7] = [
     ('的', 'e'),
     ('是', 'i'),
@@ -32,19 +28,46 @@ pub const 特简码: [(char, char); 7] = [
 ];
 pub const 数字字根: [char; 10] = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 pub const 笔画: [&str; 6] = ["1", "2", "3", "4", "5", "6"];
-pub const 左手大码: [char; 13] = ['q', 'w', 'r', 't', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
+pub const 左手大码: [char; 13] = [
+    'q', 'w', 'r', 't', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b',
+];
 pub const 右手大码: [char; 8] = ['y', 'p', 'h', 'j', 'k', 'l', 'n', 'm'];
 pub const 不好的大集合键: [char; 5] = ['q', 'z', 'p', 'y', 'b'];
 pub const 主根小码: [char; 5] = ['a', 'o', 'e', 'i', 'u'];
 
-pub type 编码 = u32;
+pub type 键 = u8;
+pub type 双键 = (键, 键);
+pub type 编码 = [u8; 4];
 pub type 频率 = f32;
 pub type 频序 = u32;
 pub const 所有汉字数: usize = 20992;
 pub const 常用简繁范围: usize = 8536;
 
+trait 转换 {
+    fn to_usize(&self) -> usize;
+
+    fn 编码空间大小() -> usize;
+}
+
+impl 转换 for 编码 {
+    fn to_usize(&self) -> usize {
+        let k = 进制 as usize;
+        let a = 空格 as usize;
+        let result = self[0] as usize * a * a * k
+            + self[1] as usize * a * k
+            + self[2] as usize * k
+            + self[3] as usize;
+        result
+    }
+
+    fn 编码空间大小() -> usize {
+        (进制 as usize).pow(3) * (空格 as usize)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct 冰雪清韵编码信息 {
+    // 常量
     pub 简体频率: 频率,
     pub 简体指数频率: 频率,
     pub 简体频序: 频序,
@@ -52,14 +75,15 @@ pub struct 冰雪清韵编码信息 {
     pub 繁体指数频率: 频率,
     pub 繁体频序: 频序,
     pub 通打频率: 频率,
-    pub 全码: 编码,
-    pub 简体简码: 编码,
-    pub 简体选重: u8,
-    pub 繁体选重: u8,
-    pub 通打选重: u8,
-    pub 完成出简: bool,
     pub 简体: bool,
     pub 繁体: bool,
+    pub 特简: bool,
+    // 变量
+    pub 全码: 编码,
+    pub 计重全码: 编码,
+    pub 计重索引: usize,
+    pub 简体简码: 编码,
+    pub 字根字: bool,
 }
 
 pub type 块 = usize;
@@ -107,18 +131,20 @@ pub struct 冰雪清韵决策 {
     pub 第二主根: char,
 }
 
+pub type 映射 = Vec<双键>;
+
 impl 冰雪清韵决策 {
-    pub fn 线性化(&self, 棱镜: &棱镜) -> Vec<编码> {
-        let mut 映射 = vec![0_u32; self.元素.len()];
-        let 第一主根左手小码 = 棱镜.键转数字[&'e'] as u32;
-        let 第一主根右手小码 = 棱镜.键转数字[&'i'] as u32;
-        let 第二主根左手小码 = 棱镜.键转数字[&'a'] as u32;
-        let 第二主根右手小码 = 棱镜.键转数字[&'o'] as u32;
+    pub fn 线性化(&self, 棱镜: &棱镜) -> 映射 {
+        let mut 映射 = vec![(0, 0); self.元素.len()];
+        let 第一主根左手小码 = 棱镜.键转数字[&'e'] as 键;
+        let 第一主根右手小码 = 棱镜.键转数字[&'i'] as 键;
+        let 第二主根左手小码 = 棱镜.键转数字[&'a'] as 键;
+        let 第二主根右手小码 = 棱镜.键转数字[&'o'] as 键;
         for (元素, 安排) in self.元素.iter().enumerate() {
             match 安排 {
                 元素安排::未选取 => {}
                 元素安排::键位(键位) => {
-                    映射[元素] = 棱镜.键转数字[键位] as u32;
+                    映射[元素] = (棱镜.键转数字[键位] as 键, 0);
                 }
                 元素安排::归并(元素1) => {
                     映射[元素] = 映射[*元素1];
@@ -129,7 +155,7 @@ impl 冰雪清韵决策 {
                     } else {
                         第一主根左手小码
                     };
-                    映射[元素] = 棱镜.键转数字[键位] as u32 + 小码 * 进制;
+                    映射[元素] = (棱镜.键转数字[键位] as 键, 小码);
                 }
                 元素安排::键位第二(键位) => {
                     let 小码 = if 左手大码.contains(键位) {
@@ -137,13 +163,13 @@ impl 冰雪清韵决策 {
                     } else {
                         第二主根左手小码
                     };
-                    映射[元素] = 棱镜.键转数字[键位] as u32 + 小码 * 进制;
+                    映射[元素] = (棱镜.键转数字[键位] as 键, 小码);
                 }
                 元素安排::归并韵母 { 字根, 韵母 } => {
-                    映射[元素] = 映射[*字根] % 进制 + 映射[*韵母] * 进制;
+                    映射[元素] = (映射[*字根].0, 映射[*韵母].0);
                 }
                 元素安排::声母韵母 { 声母, 韵母 } => {
-                    映射[元素] = 映射[*声母] + 映射[*韵母] * 进制;
+                    映射[元素] = (映射[*声母].0, 映射[*韵母].0);
                 }
             }
         }
@@ -302,26 +328,33 @@ impl 元素安排 {
 
 #[derive(Debug, Clone)]
 pub struct 冰雪清韵决策变化 {
+    pub 全局变化: bool,
     pub 移动字根: Vec<元素>,
     pub 增加字根: Vec<元素>,
     pub 减少字根: Vec<元素>,
 }
 
 impl 冰雪清韵决策变化 {
-    pub fn 无变化() -> Self {
+    pub fn 新建(
+        全局变化: bool,
+        移动字根: Vec<元素>,
+        增加字根: Vec<元素>,
+        减少字根: Vec<元素>,
+    ) -> Self {
         冰雪清韵决策变化 {
-            移动字根: vec![],
-            增加字根: vec![],
-            减少字根: vec![],
-        }
-    }
-
-    pub fn 新建(移动字根: Vec<元素>, 增加字根: Vec<元素>, 减少字根: Vec<元素>) -> Self {
-        冰雪清韵决策变化 {
+            全局变化,
             移动字根,
             增加字根,
             减少字根,
         }
+    }
+
+    pub fn 无变化() -> Self {
+        Self::新建(false, vec![], vec![], vec![])
+    }
+
+    pub fn 全局变化() -> Self {
+        Self::新建(true, vec![], vec![], vec![])
     }
 }
 
@@ -352,6 +385,7 @@ impl 解特征 for 冰雪清韵决策 {
             }
         }
         冰雪清韵决策变化 {
+            全局变化: 旧变化.全局变化 || 新变化.全局变化,
             移动字根,
             增加字根,
             减少字根,

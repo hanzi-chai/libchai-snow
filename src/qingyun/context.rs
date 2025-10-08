@@ -1,10 +1,10 @@
 use crate::qingyun::{
     不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息, 动态拆分项,
-    原始音节信息, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件, 条件元素安排, 笔画,
-    编码, 进制, 音节信息, 频序, 频率,
+    原始音节信息, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件, 条件元素安排, 空格,
+    笔画, 编码, 转换, 进制, 音节信息, 频序, 频率,
 };
 use chai::{
-    config::{Condition, Mapped, ValueDescription, 配置},
+    config::{Condition, Mapped, MappedKey, ValueDescription, 配置},
     contexts::上下文,
     interfaces::{command_line::读取文本文件, 默认输入},
     objectives::metric::指法标记,
@@ -181,12 +181,6 @@ impl 冰雪清韵上下文 {
                     };
                     let 键位 = 编码.chars().next().unwrap();
                     初始决策.元素[序号] = 元素安排::键位(键位);
-                    let 鼓励归并 = [
-                        ("韵-ai", 'i'),
-                        ("韵-ei", 'a'),
-                        ("韵-ou", 'o'),
-                        ("韵-ü", 'u'),
-                    ];
                     match 元素.as_str() {
                         "韵-a" | "韵-e" | "韵-i" | "韵-o" | "韵-u" => {
                             决策空间.元素[序号] = vec![初始决策.元素[序号].clone().into()];
@@ -201,10 +195,7 @@ impl 冰雪清韵上下文 {
                             决策空间.元素[序号] = ['a', 'e', 'i', 'o', 'u']
                                 .into_iter()
                                 .map(|键位| {
-                                    if 鼓励归并
-                                        .iter()
-                                        .any(|&(韵, 鼓励键)| 元素 == 韵 && 鼓励键 == 键位)
-                                    {
+                                    if 元素 == "韵-ü" && 键位 == 'u' {
                                         条件元素安排 {
                                             安排: 元素安排::键位(键位),
                                             条件列表: vec![],
@@ -222,12 +213,24 @@ impl 冰雪清韵上下文 {
                 决策空间.字根.push(序号);
                 let mut 原始安排列表 = 原始决策空间.get(元素).cloned().unwrap_or(vec![]);
                 let 当前决策 = 原始决策.get(元素).unwrap_or(&Mapped::Unused(()));
-                if !原始安排列表.iter().any(|x| &x.value == 当前决策) {
-                    原始安排列表.push(ValueDescription {
-                        value: 当前决策.clone(),
-                        score: 0.0,
-                        condition: None,
-                    });
+                let 当前决策为乱序 = if let Mapped::Advanced(v) = 当前决策 {
+                    if let MappedKey::Ascii(_) = v[0] {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !当前决策为乱序 && !原始安排列表.iter().any(|x| &x.value == 当前决策) {
+                    原始安排列表.insert(
+                        0,
+                        ValueDescription {
+                            value: 当前决策.clone(),
+                            score: 0.0,
+                            condition: None,
+                        },
+                    );
                 }
                 let mut 安排列表 = vec![];
                 for 原始安排 in &原始安排列表 {
@@ -354,6 +357,39 @@ impl 冰雪清韵上下文 {
             下游字根,
             拼音,
         })
+    }
+
+    pub fn 预处理当量信息(&self) -> Vec<f32> {
+        let mut 当量信息 = vec![0.0; 编码::编码空间大小()];
+        let s = vec![];
+        let 空格1 = 空格 as u8;
+        let 进制1 = 进制 as u8;
+        for c1 in 0..空格1 {
+            let mut s1 = s.clone();
+            self.棱镜.数字转键.get(&(c1 as u64)).map(|z| s1.push(*z));
+            for c2 in 0..空格1 {
+                let mut s2 = s1.clone();
+                self.棱镜.数字转键.get(&(c2 as u64)).map(|z| s2.push(*z));
+                for c3 in 0..空格1 {
+                    let mut s3 = s2.clone();
+                    self.棱镜.数字转键.get(&(c3 as u64)).map(|z| s3.push(*z));
+                    for c4 in 0..进制1 {
+                        let mut s4 = s3.clone();
+                        self.棱镜.数字转键.get(&(c4 as u64)).map(|z| s4.push(*z));
+                        let c = [c1, c2, c3, c4].to_usize();
+                        for range in [0..2, 1..3, 2..4, 0..3, 1..4, 0..4] {
+                            if range.end > s4.len() {
+                                continue;
+                            }
+                            let substr: String = s4[range].iter().collect();
+                            当量信息[c as usize] +=
+                                *self.原始当量信息.get(&substr).unwrap_or(&0.0) as f32;
+                        }
+                    }
+                }
+            }
+        }
+        当量信息
     }
 
     fn 读取拼音(棱镜: &棱镜) -> Vec<音节信息> {
@@ -547,15 +583,21 @@ impl 冰雪清韵上下文 {
         (固定拆分, 动态拆分, 块转数字, 数字转块, 简体顺序, 繁体顺序)
     }
 
+    fn 转编码(&self, code: 编码) -> String {
+        code.iter()
+            .filter_map(|x| self.棱镜.数字转键.get(&(*x as u64)))
+            .cloned()
+            .collect()
+    }
+
     pub fn 生成码表(&self, 编码结果: &[冰雪清韵编码信息]) -> Vec<码表项> {
         let mut 码表 = Vec::new();
-        let 转编码 = |code: 编码| self.棱镜.数字转编码(code as u64).iter().collect();
         for (序号, 可编码对象) in self.固定拆分.iter().enumerate() {
             let 码表项 = 码表项 {
                 name: 可编码对象.词.to_string(),
-                full: 转编码(编码结果[序号].全码),
+                full: self.转编码(编码结果[序号].计重全码),
                 full_rank: 0,
-                short: 转编码(编码结果[序号].简体简码),
+                short: self.转编码(编码结果[序号].简体简码),
                 short_rank: 0,
             };
             码表.push(码表项);
@@ -567,23 +609,23 @@ impl 冰雪清韵上下文 {
         &self,
         编码结果: &[冰雪清韵编码信息],
         顺序: &Vec<usize>,
-        标签: &impl Fn(&冰雪清韵编码信息) -> bool,
         频率: &impl Fn(&冰雪清韵编码信息) -> 频率,
     ) -> Vec<(编码, Vec<char>, 频率)> {
         let mut 翻转码表 = FxHashMap::default();
         let mut 重码组列表 = vec![];
         for 索引 in 顺序 {
             翻转码表
-                .entry(编码结果[*索引].全码)
+                .entry(编码结果[*索引].计重全码)
                 .or_insert_with(|| vec![])
-                .push(self.固定拆分[*索引].词);
+                .push((self.固定拆分[*索引].词, 频率(&编码结果[*索引])));
         }
-        for 索引 in 顺序 {
-            if 标签(&编码结果[*索引]) {
-                let 重码组 = &翻转码表[&编码结果[*索引].全码];
-                重码组列表.push((编码结果[*索引].全码, 重码组.clone(), 频率(&编码结果[*索引])));
+        for (全码, 重码组) in 翻转码表 {
+            if 重码组.len() > 1 {
+                let 总频率: 频率 = 重码组[1..].iter().map(|x| x.1).sum();
+                重码组列表.push((全码, 重码组.iter().map(|x| x.0).collect(), 总频率));
             }
         }
+        重码组列表.sort_by_key(|(_, _, 频率)| std::cmp::Reverse((*频率 * 1_000_000.0) as u64));
         重码组列表
     }
 
@@ -597,12 +639,9 @@ impl 冰雪清韵上下文 {
         let 简体前三千: Vec<_> = self.简体顺序.iter().take(3000).cloned().collect();
         let 繁体前三千: Vec<_> = self.繁体顺序.iter().take(3000).cloned().collect();
         let 通打前三千: Vec<_> = (0..3000).collect();
-        let 简体重码组列表 =
-            self.翻转码表(编码结果, &简体前三千, &|x| x.简体选重 > 0, &|x| x.简体频率);
-        let 繁体重码组列表 =
-            self.翻转码表(编码结果, &繁体前三千, &|x| x.繁体选重 > 0, &|x| x.繁体频率);
-        let 通打重码组列表 =
-            self.翻转码表(编码结果, &通打前三千, &|x| x.通打选重 > 0, &|x| x.通打频率);
+        let 简体重码组列表 = self.翻转码表(编码结果, &简体前三千, &|x| x.简体频率);
+        let 繁体重码组列表 = self.翻转码表(编码结果, &繁体前三千, &|x| x.繁体频率);
+        let 通打重码组列表 = self.翻转码表(编码结果, &通打前三千, &|x| x.通打频率);
         for (label, 重码组列表) in [
             ("简体", 简体重码组列表),
             ("繁体", 繁体重码组列表),
@@ -610,7 +649,7 @@ impl 冰雪清韵上下文 {
         ] {
             writeln!(文件, "# 前 3000 中{label}全码重码\n")?;
             for (全码, 重码组, 次选频率) in 重码组列表 {
-                let 全码: String = self.棱镜.数字转编码(全码 as u64).iter().collect();
+                let 全码 = self.转编码(全码);
                 let 百万分之频率 = 次选频率 * 1_000_000.0;
                 writeln!(文件, "- {全码} {重码组:?} [{百万分之频率:.2} μ]")?;
             }
@@ -622,11 +661,12 @@ impl 冰雪清韵上下文 {
         for 序号 in 简体前三千.into_iter() {
             let 编码信息 = &编码结果[序号];
             let 词 = self.固定拆分[序号].词;
-            let 简码 = self.棱镜.数字转编码(编码信息.简体简码 as u64);
+            let 简码 = self.转编码(编码信息.简体简码);
             if 简码.len() == 4 && 序号 < 500 {
-                四键字.push((词, 简码.iter().collect::<String>()));
+                四键字.push((词, 简码.clone()));
             }
             if 序号 < 1500 {
+                let 简码: Vec<char> = 简码.chars().collect();
                 for 键索引 in 0..(简码.len() - 1) {
                     let 组合 = (简码[键索引], 简码[键索引 + 1]);
                     if 指法标记.同指大跨排.contains(&组合) || 指法标记.错手.contains(&组合)
