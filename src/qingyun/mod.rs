@@ -11,8 +11,8 @@ pub mod objective;
 pub mod operators;
 
 pub const 大集合: [char; 21] = [
-    'b', 'p', 'm', 'f', 'd', 't', 'n', 'l', 'g', 'k', 'h', 'j', 'q', 'x', 'z', 'c', 's', 'r', 'w',
-    'y', 'v',
+    'b', 'p', 'm', 'f', 'd', 't', 'n', 'l', 'g', 'k', 'h', 'j', 'q', 'x', 'z', 'c', 's', 'r', 'v',
+    'w', 'y',
 ];
 pub const 小集合: [char; 10] = ['_', 'e', 'i', 'o', 'u', 'a', ';', '/', ',', '.'];
 pub const 进制: 键 = 32;
@@ -42,6 +42,7 @@ pub type 频率 = f32;
 pub type 频序 = u32;
 pub const 所有汉字数: usize = 20992;
 pub const 常用简繁范围: usize = 8536;
+pub const 无空格: bool = false;
 
 trait 转换 {
     fn to_usize(&self) -> usize;
@@ -98,7 +99,7 @@ pub struct 固定拆分项 {
     pub 繁体频序: 频序,
     pub 通打频率: 频率,
     pub 字块: [块; 4],
-    pub 通规: u8,
+    pub 通规: bool,
     pub gb2312: bool,
     pub 国字常用: bool,
     pub 陆标: bool,

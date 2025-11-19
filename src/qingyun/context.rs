@@ -1,26 +1,46 @@
 use crate::qingyun::{
-    不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息, 动态拆分项,
-    原始音节信息, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件, 条件元素安排, 空格,
-    笔画, 编码, 转换, 进制, 音节信息, 频序, 频率,
+    encoder::简码覆盖, 不好的大集合键, 元素安排, 冰雪清韵决策, 冰雪清韵决策空间, 冰雪清韵编码信息,
+    动态拆分项, 原始音节信息, 固定拆分项, 大集合, 小集合, 常用简繁范围, 拆分输入, 条件,
+    条件元素安排, 空格, 笔画, 编码, 转换, 进制, 音节信息, 频序, 频率,
 };
 use chai::{
     config::{Condition, Mapped, MappedKey, ValueDescription, 配置},
     contexts::上下文,
     interfaces::{command_line::读取文本文件, 默认输入},
     objectives::metric::指法标记,
-    元素, 原始当量信息, 原始键位分布信息, 棱镜, 码表项, 错误,
+    元素, 原始当量信息, 原始键位分布信息, 棱镜, 错误,
 };
 use chrono::Local;
 use core::panic;
+use csv::WriterBuilder;
 use indexmap::IndexMap;
 use itertools::Itertools;
+use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde::Serialize;
 use serde_yaml::{from_str, to_string};
 use std::{
     fs::{File, read_to_string},
     io::Write,
     path::PathBuf,
 };
+
+pub fn 写入文本文件<I, T>(path: PathBuf, content: T)
+where
+    I: Serialize,
+    T: IntoIterator<Item = I>,
+{
+    let mut writer = WriterBuilder::new()
+        .delimiter(b'\t')
+        .has_headers(false)
+        .flexible(true)
+        .from_path(path)
+        .unwrap();
+    for item in content {
+        writer.serialize(item).unwrap();
+    }
+    writer.flush().unwrap();
+}
 
 #[derive(Clone)]
 pub struct 冰雪清韵上下文 {
@@ -177,6 +197,7 @@ impl 冰雪清韵上下文 {
                     决策空间.元素[序号] = vec![初始决策.元素[序号].clone().into()];
                 } else {
                     let Mapped::Basic(编码) = 编码 else {
+                        println!("元素 {} 的编码不是 Basic 或 Grouped", 元素);
                         unreachable!();
                     };
                     let 键位 = 编码.chars().next().unwrap();
@@ -222,7 +243,8 @@ impl 冰雪清韵上下文 {
                 } else {
                     false
                 };
-                if !当前决策为乱序 && !原始安排列表.iter().any(|x| &x.value == 当前决策) {
+                if !当前决策为乱序 && !原始安排列表.iter().any(|x| &x.value == 当前决策)
+                {
                     原始安排列表.insert(
                         0,
                         ValueDescription {
@@ -304,7 +326,15 @@ impl 冰雪清韵上下文 {
                         .clone();
                     for 键位 in 大集合 {
                         let 安排 = 元素安排::键位第二(键位);
-                        if 安排列表.iter().any(|x| x.安排 == 安排) {
+                        if 安排列表.iter().any(|x| {
+                            if x.安排 == 安排 {
+                                true
+                            } else if let 元素安排::声母韵母 { 声母, .. } = x.安排 {
+                                初始决策.元素[声母] == 元素安排::键位(键位)
+                            } else {
+                                false
+                            }
+                        }) {
                             continue;
                         }
                         安排列表.push(条件元素安排 {
@@ -519,12 +549,12 @@ impl 冰雪清韵上下文 {
             固定拆分.push(固定拆分项 {
                 词: 词.汉字,
                 简体频率,
-                简体频序: 0,
+                简体频序: 频序::MAX,
                 繁体频率,
-                繁体频序: 0,
+                繁体频序: 频序::MAX,
                 通打频率: 0.0,
                 字块,
-                通规: 词.通规,
+                通规: 词.通规 > 0,
                 gb2312: 词.gb2312,
                 国字常用: 词.国字常用,
                 陆标,
@@ -541,7 +571,7 @@ impl 冰雪清韵上下文 {
                 .partial_cmp(&a.通打频率)
                 .unwrap()
                 .then_with(|| (b.国字常用 || b.陆标).cmp(&(a.国字常用 || a.陆标)))
-                .then_with(|| b.gb2312.cmp(&a.gb2312))
+                .then_with(|| (b.gb2312).cmp(&(a.gb2312)))
         });
         for i in 0..常用简繁范围 {
             assert!(
@@ -590,19 +620,130 @@ impl 冰雪清韵上下文 {
             .collect()
     }
 
-    pub fn 生成码表(&self, 编码结果: &[冰雪清韵编码信息]) -> Vec<码表项> {
-        let mut 码表 = Vec::new();
-        for (序号, 可编码对象) in self.固定拆分.iter().enumerate() {
-            let 码表项 = 码表项 {
-                name: 可编码对象.词.to_string(),
-                full: self.转编码(编码结果[序号].计重全码),
-                full_rank: 0,
-                short: self.转编码(编码结果[序号].简体简码),
-                short_rank: 0,
-            };
-            码表.push(码表项);
+    fn 排序编码(&self, res: &Vec<Regex>, code: &String) -> (usize, usize, Vec<usize>) {
+        let order = "bpmfdtnlgkhjqxzcsrvwyaoeiu;,./";
+        let mut category = usize::MAX;
+        for (index, re) in res.iter().enumerate() {
+            if re.is_match(code) {
+                category = index;
+                break;
+            }
         }
-        码表
+        let length = code.len();
+        let orders = code
+            .chars()
+            .map(|c| order.find(c).unwrap_or(usize::MAX))
+            .collect();
+        (category, length, orders)
+    }
+
+    pub fn 生成码表(&self, 编码结果: &[冰雪清韵编码信息], 目录: Option<PathBuf>) {
+        let 目录 = 目录.unwrap_or_else(|| PathBuf::from("output"));
+        let mut 宇浩测评码表 = Vec::new();
+        let mut 大竹码表 = Vec::new();
+        let mut 形码盒子测评码表 = Vec::new();
+        let mut 未排序固态词典码表 = FxHashMap::default();
+        for (可编码对象, 编码信息) in self
+            .固定拆分
+            .iter()
+            .zip(编码结果)
+            .sorted_by_key(|(_, x)| x.简体频序)
+        {
+            let 全码 = self.转编码(编码信息.计重全码);
+            let 无空格全码 = 全码.replace("_", "");
+            let 带空格全码 = 全码.replace("_", " ");
+            let 简码 = self.转编码(编码信息.简体简码);
+            let 无空格简码 = 简码.replace("_", "");
+            let 带空格简码 = 简码.replace("_", " ");
+            宇浩测评码表.push((可编码对象.词, 无空格全码.clone()));
+            大竹码表.push((全码.clone(), 可编码对象.词.to_string()));
+            形码盒子测评码表.push((可编码对象.词, 带空格全码.clone()));
+            未排序固态词典码表
+                .entry(无空格全码.clone())
+                .or_insert_with(Vec::new)
+                .push(可编码对象.词.to_string());
+            if !无空格简码.is_empty() && 无空格简码 != 无空格全码 {
+                宇浩测评码表.push((可编码对象.词, 无空格简码.clone()));
+                大竹码表.push((简码.clone(), 可编码对象.词.to_string()));
+                形码盒子测评码表.push((可编码对象.词, 带空格简码.clone()));
+                if self.转编码(编码信息.简体简码).len() > 1 {
+                    未排序固态词典码表
+                        .entry(无空格简码.clone())
+                        .or_insert_with(Vec::new)
+                        .push(可编码对象.词.to_string());
+                }
+            }
+        }
+        let 拆分结果: Vec<(String, String)> =
+            读取文本文件(PathBuf::from("data/拆分结果.txt"));
+        for (字, 拆分) in 拆分结果 {
+            大竹码表.push((format!("拆分［{}］", 拆分.clone()), 字));
+        }
+        self.后处理固态词典码表(&mut 未排序固态词典码表, &mut 大竹码表);
+        let re1 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]$").unwrap();
+        let re2 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy][aoeiu;,./]$").unwrap();
+        let re3 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{2}$").unwrap();
+        let re4 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{2}[aoeiu;,./]$").unwrap();
+        let re5 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{3}$").unwrap();
+        let re6 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{3}[aoeiu;,./]$").unwrap();
+        let re7 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{4}$").unwrap();
+        let res = vec![re1, re2, re3, re4, re5, re6, re7];
+        let 固态词典码表: Vec<_> = 未排序固态词典码表
+            .into_iter()
+            .sorted_by_key(|(编码字符串, _)| self.排序编码(&res, &编码字符串))
+            .map(|(字符串, 词列表)| (字符串, 词列表.join(" ")))
+            .collect();
+        写入文本文件(目录.join("冰雪清韵.txt"), 宇浩测评码表);
+        写入文本文件(目录.join("大竹码表.txt"), 大竹码表);
+        写入文本文件(目录.join("形码盒子测评码表.txt"), 形码盒子测评码表);
+        写入文本文件(目录.join("snow_qingyun.fixed.txt"), 固态词典码表);
+    }
+
+    pub fn 后处理固态词典码表(
+        &self,
+        固态词典码表: &mut FxHashMap<String, Vec<String>>,
+        大竹码表: &mut Vec<(String, String)>,
+    ) {
+        let 简码覆盖: 简码覆盖 = from_str(&read_to_string("data/override.yaml").unwrap()).unwrap();
+        for (简词, 编码) in 简码覆盖.简词快符 {
+            固态词典码表.insert(编码.clone(), vec![简词.clone()]);
+            大竹码表.push((编码.clone(), 简词.clone()));
+        }
+        let 数字信息 = [
+            ('1', '一', "yi"),
+            ('2', '二', "vi"),
+            ('3', '三', "s;"),
+            ('4', '四', "si"),
+            ('5', '五', "wu"),
+            ('6', '六', "la"),
+            ('7', '七', "qi"),
+            ('8', '八', "ba"),
+            ('9', '九', "ja"),
+            ('0', '零', "l/"),
+        ];
+        for (数字, 汉字, 编码) in 数字信息 {
+            let 条目 = &mut 固态词典码表
+                .entry(编码.to_string())
+                .or_insert_with(Vec::new);
+            条目.push(数字.to_string());
+            条目.push(汉字.to_string());
+        }
+
+        for key in "bpmfdtnlgkhjqxzcsrvwy".chars() {
+            let 编码 = format!("{}.", key);
+            let 条目 = &mut 固态词典码表.entry(编码.clone()).or_insert_with(Vec::new);
+            if 条目.is_empty() {
+                条目.push("🈚️".to_string());
+            }
+            条目.push(key.to_uppercase().to_string());
+            条目.push(key.to_string());
+        }
+        for key in "aoeiu".chars() {
+            let 编码 = format!("m{}", key);
+            let 条目 = &mut 固态词典码表.entry(编码.clone()).or_insert_with(Vec::new);
+            条目.push(key.to_uppercase().to_string());
+            条目.push(key.to_string());
+        }
     }
 
     pub fn 翻转码表(
@@ -633,37 +774,101 @@ impl 冰雪清韵上下文 {
     pub fn 分析码表(
         &self,
         编码结果: &[冰雪清韵编码信息],
-        路径: &PathBuf,
+        目录: Option<PathBuf>,
     ) -> Result<(), 错误> {
-        let mut 文件 = File::create(路径).unwrap();
+        let 分析路径 = 目录
+            .unwrap_or_else(|| PathBuf::from("output"))
+            .join("分析.md");
+        let mut 文件 = File::create(分析路径).unwrap();
+        let mut 二码字根字 = FxHashMap::default();
+        let mut 三码字根字 = FxHashMap::default();
+        let mut 无理一简多重 = FxHashMap::default();
+        let mut 二简 = FxHashMap::default();
+        for (序号, 编码信息) in 编码结果.iter().enumerate() {
+            let 词 = self.固定拆分[序号].词;
+            let 频率 = 编码信息.简体频率 * 10000.0;
+            if !self.固定拆分[序号].通规 {
+                continue;
+            }
+            if 编码信息.字根字 {
+                let 全码 = self.转编码(编码信息.全码);
+                let 第一码 = 全码.chars().next().unwrap();
+                if 编码信息.全码 == 编码信息.简体简码 {
+                    二码字根字
+                        .entry(第一码)
+                        .or_insert_with(Vec::new)
+                        .push(format!("{词} {全码} {频率:.0}"));
+                } else {
+                    三码字根字
+                        .entry(第一码)
+                        .or_insert_with(Vec::new)
+                        .push(format!("{词} {全码} {频率:.0}"));
+                }
+            } else {
+                let 简码 = self.转编码(编码信息.简体简码);
+                if 简码.len() == 2 {
+                    let 第一码 = 简码.chars().next().unwrap();
+                    无理一简多重
+                        .entry(第一码)
+                        .or_insert_with(Vec::new)
+                        .push(format!("{词} {简码} {频率:.0}"));
+                } else if 简码.len() == 3 && 简码.ends_with("_") {
+                    let 第一码 = 简码.chars().next().unwrap();
+                    二简
+                        .entry(第一码)
+                        .or_insert_with(Vec::new)
+                        .push(format!("{词} {简码} {频率:.0}"));
+                }
+            }
+        }
+        writeln!(
+            文件,
+            "# 无理一简多重 {}\n",
+            无理一简多重.values().map(|x| x.len()).sum::<usize>()
+        )?;
+        for (第一码, 列表) in 无理一简多重.iter().sorted_by_key(|x| x.0) {
+            writeln!(文件, "- {第一码}: {}", 列表.join(" "))?;
+        }
+        writeln!(
+            文件,
+            "\n# 二码字根字 {}\n",
+            二码字根字.values().map(|x| x.len()).sum::<usize>()
+        )?;
+        for (第一码, 列表) in 二码字根字.iter().sorted_by_key(|x| x.0) {
+            writeln!(文件, "- {第一码}: {}", 列表.join(" "))?;
+        }
+        writeln!(
+            文件,
+            "\n# 二简 {}\n",
+            二简.values().map(|x| x.len()).sum::<usize>()
+        )?;
+        for (第一码, 列表) in 二简.iter().sorted_by_key(|x| x.0) {
+            writeln!(文件, "- {第一码}: {}", 列表.join(" "))?;
+        }
+        writeln!(
+            文件,
+            "\n# 三码字根字 {}\n",
+            三码字根字.values().map(|x| x.len()).sum::<usize>()
+        )?;
+        for (第一码, 列表) in 三码字根字.iter().sorted_by_key(|x| x.0) {
+            writeln!(文件, "- {第一码}: {}", 列表.join(" "))?;
+        }
         let 简体前三千: Vec<_> = self.简体顺序.iter().take(3000).cloned().collect();
         let 繁体前三千: Vec<_> = self.繁体顺序.iter().take(3000).cloned().collect();
         let 通打前三千: Vec<_> = (0..3000).collect();
-        let 简体重码组列表 = self.翻转码表(编码结果, &简体前三千, &|x| x.简体频率);
-        let 繁体重码组列表 = self.翻转码表(编码结果, &繁体前三千, &|x| x.繁体频率);
-        let 通打重码组列表 = self.翻转码表(编码结果, &通打前三千, &|x| x.通打频率);
-        for (label, 重码组列表) in [
-            ("简体", 简体重码组列表),
-            ("繁体", 繁体重码组列表),
-            ("通打", 通打重码组列表),
-        ] {
-            writeln!(文件, "# 前 3000 中{label}全码重码\n")?;
-            for (全码, 重码组, 次选频率) in 重码组列表 {
-                let 全码 = self.转编码(全码);
-                let 百万分之频率 = 次选频率 * 1_000_000.0;
-                writeln!(文件, "- {全码} {重码组:?} [{百万分之频率:.2} μ]")?;
-            }
-            writeln!(文件, "")?;
-        }
         let 指法标记 = 指法标记::new();
         let mut 差指法 = vec![];
         let mut 四键字 = vec![];
-        for 序号 in 简体前三千.into_iter() {
+        let mut 三键字 = vec![];
+        for &序号 in 简体前三千.iter() {
             let 编码信息 = &编码结果[序号];
             let 词 = self.固定拆分[序号].词;
             let 简码 = self.转编码(编码信息.简体简码);
+            if 简码.len() == 3 && 序号 < 200 {
+                三键字.push((词, 简码.clone(), 编码信息.简体频率));
+            }
             if 简码.len() == 4 && 序号 < 500 {
-                四键字.push((词, 简码.clone()));
+                四键字.push((词, 简码.clone(), 编码信息.简体频率));
             }
             if 序号 < 1500 {
                 let 简码: Vec<char> = 简码.chars().collect();
@@ -679,11 +884,31 @@ impl 冰雪清韵上下文 {
         }
         writeln!(文件, "\n# 前 1500 中简码差指法项\n")?;
         for (字, 编码) in 差指法 {
-            writeln!(文件, "- {字} {编码}")?;
+            write!(文件, "{字} {编码}；")?;
         }
-        writeln!(文件, "\n# 前 500 中四键字\n").unwrap();
-        for (字, 编码) in 四键字 {
-            writeln!(文件, "- {字} {编码}")?;
+        writeln!(文件, "\n\n# 前 200 中三键字\n").unwrap();
+        for (字, 编码, 频率) in 三键字 {
+            write!(文件, "{字} {编码} {:.0}；", 频率 * 10000.0)?;
+        }
+        writeln!(文件, "\n\n# 前 500 中四键字\n").unwrap();
+        for (字, 编码, 频率) in 四键字 {
+            write!(文件, "{字} {编码} {:.0}；", 频率 * 10000.0)?;
+        }
+        writeln!(文件, "")?;
+        let 简体重码组列表 = self.翻转码表(编码结果, &简体前三千, &|x| x.简体频率);
+        let 繁体重码组列表 = self.翻转码表(编码结果, &繁体前三千, &|x| x.繁体频率);
+        let 通打重码组列表 = self.翻转码表(编码结果, &通打前三千, &|x| x.通打频率);
+        for (label, 重码组列表) in [
+            ("简体", 简体重码组列表),
+            ("繁体", 繁体重码组列表),
+            ("通打", 通打重码组列表),
+        ] {
+            writeln!(文件, "\n# 前 3000 中{label}全码重码\n")?;
+            for (全码, 重码组, 次选频率) in 重码组列表 {
+                let 全码 = self.转编码(全码);
+                let 百万分之频率 = 次选频率 * 1_000_000.0;
+                writeln!(文件, "- {全码} {重码组:?} [{百万分之频率:.2} μ]")?;
+            }
         }
         Ok(())
     }

@@ -22,27 +22,23 @@ impl 变异 for 冰雪清韵操作 {
     type 解类型 = 冰雪清韵决策;
     fn 变异(&mut self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
         let 随机数: f64 = random();
-        if 随机数 < 0.05 {
+        let mut 变化 = if 随机数 < 0.05 {
             self.改变补码键(决策)
         } else if 随机数 < 0.2 {
-            self.交换韵母(决策)
+            self.交换主副根(决策)
+        } else if 随机数 < 0.25 {
+            self.交换主根(决策)
+        } else if 随机数 < 0.30 {
+            self.移动笔画(决策)
+        } else if 随机数 < 0.55 {
+            self.产生副根(决策)
+        } else if 随机数 < 0.80 {
+            self.湮灭副根(决策)
         } else {
-            let mut 变化 = if 随机数 < 0.3 {
-                self.交换主副根(决策)
-            } else if 随机数 < 0.35 {
-                self.移动笔画(决策)
-            } else if 随机数 < 0.4 {
-                self.交换主根(决策)
-            } else if 随机数 < 0.6 {
-                self.产生副根(决策)
-            } else if 随机数 < 0.8 {
-                self.湮灭副根(决策)
-            } else {
-                self.移动副根(决策)
-            };
-            self.传播(&mut 变化, 决策);
-            变化
-        }
+            self.移动副根(决策)
+        };
+        self.传播(&mut 变化, 决策);
+        变化
     }
 }
 
@@ -137,11 +133,23 @@ impl 冰雪清韵操作 {
         冰雪清韵决策变化::全局变化()
     }
 
-    fn 交换韵母(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
+    fn _交换韵母(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
         let mut rng = thread_rng();
         let 非鼻音韵母列表 =
             ["韵-ai", "韵-ei", "韵-ao", "韵-ou", "韵-ü"].map(|s| self._棱镜.元素转数字[s]);
         let 鼻音韵母列表 = ["韵-an", "韵-en", "韵-ang", "韵-eng"].map(|s| self._棱镜.元素转数字[s]);
+        let er = self._棱镜.元素转数字["韵-er"];
+        if random::<f64>() < 0.1 {
+            let 安排 = 决策.元素[er].clone();
+            let mut 可行安排 = vec![];
+            for 条件安排 in &self.决策空间.元素[er] {
+                if 条件安排.安排 != 安排 {
+                    可行安排.push(条件安排.安排.clone());
+                }
+            }
+            决策.元素[er] = 可行安排.into_iter().choose(&mut rng).unwrap();
+            return 冰雪清韵决策变化::全局变化();
+        }
         let 选择: Vec<_> = if random::<f64>() < 0.5 {
             鼻音韵母列表.choose_multiple(&mut rng, 2).collect()
         } else {
@@ -391,9 +399,16 @@ impl 冰雪清韵操作 {
                 None
             })
             .collect();
-        let (字根1, 键位1) = *主根列表.iter().choose(&mut rng).unwrap();
-        let (字根2, 键位2) = *主根列表.iter().choose(&mut rng).unwrap();
-        if 字根1 == 字根2 {
+        let 采样 = 主根列表.iter().choose_multiple(&mut rng, 2);
+        let (字根1, 键位1) = *采样[0];
+        let (字根2, 键位2) = *采样[1];
+        if !self.决策空间.元素[字根1]
+            .iter()
+            .any(|x| x.安排 == 元素安排::键位第二(键位2))
+            || !self.决策空间.元素[字根2]
+                .iter()
+                .any(|x| x.安排 == 元素安排::键位第二(键位1))
+        {
             return 冰雪清韵决策变化::无变化();
         }
         决策.元素[字根1] = 元素安排::键位第二(键位2);
