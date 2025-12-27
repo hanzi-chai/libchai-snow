@@ -1,7 +1,7 @@
-use crate::qingyun::{
+use crate::{common::键盘布局, qingyun::{
     context::冰雪清韵上下文, encoder::冰雪清韵编码器, 元素安排, 冰雪清韵决策, 冰雪清韵决策变化,
     冰雪清韵决策空间, 大集合, 所有汉字数, 转换, 进制, 音节信息, 频序, 频率,
-};
+}};
 use chai::{encoders::编码器, objectives::目标函数, 棱镜, 键位分布信息};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
@@ -58,13 +58,6 @@ pub struct 冰雪清韵指标 {
     pub 音码组合当量: 频率,
     pub 键转数字: FxHashMap<char, u64>,
 }
-
-const 键盘布局: [[char; 10]; 4] = [
-    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
-    ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
-    ['_', '\'', '-', '=', '[', ']', '\\', '`', ' ', ' '],
-];
 
 impl Display for 冰雪清韵指标 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -319,9 +312,9 @@ impl 冰雪清韵目标函数 {
                     1
                 };
                 码长 += 编码信息.简体频率 * 编码长度 as 频率;
-                总组合当量 += 编码信息.简体频率 as 频率 * self.当量信息[简码.to_usize()];
+                总组合当量 += 编码信息.简体频率 as 频率 * self.当量信息[简码.hash()];
                 总稳健组合数 += 编码信息.简体指数频率 * (编码长度 - 1) as 频率;
-                总稳健组合当量 += 编码信息.简体指数频率 * self.当量信息[简码.to_usize()];
+                总稳健组合当量 += 编码信息.简体指数频率 * self.当量信息[简码.hash()];
             }
         }
         形码分布.iter_mut().for_each(|x| *x /= 码长);
@@ -437,16 +430,16 @@ impl 冰雪清韵目标函数 {
 
 impl 目标函数 for 冰雪清韵目标函数 {
     type 目标值 = 冰雪清韵指标;
-    type 解类型 = 冰雪清韵决策;
+    type 决策 = 冰雪清韵决策;
 
     /// 计算各个部分编码的指标，然后将它们合并成一个指标输出
     fn 计算(
         &mut self,
-        解: &冰雪清韵决策,
+        决策: &冰雪清韵决策,
         变化: &Option<冰雪清韵决策变化>,
     ) -> (冰雪清韵指标, f64) {
-        self.编码器.编码(解, 变化, &mut vec![]);
-        let (指标, 目标函数值) = self.calculate(解);
+        self.编码器.编码(决策, 变化, &mut vec![]);
+        let (指标, 目标函数值) = self.calculate(决策);
         (指标, 目标函数值.into())
     }
 }

@@ -15,6 +15,7 @@ pub struct 简码覆盖 {
     pub 一简: FxHashMap<char, String>,
     pub 字根: Vec<char>,
     pub 简词快符: FxHashMap<String, String>,
+    pub 二简词: FxHashMap<String, String>,
 }
 
 pub struct 冰雪清韵编码器 {
@@ -407,8 +408,8 @@ impl 冰雪清韵编码器 {
                 子问题.一简十重.push(编码);
             }
             子问题.一简十重.sort_by(|&x, &y| {
-                self.当量信息[x.to_usize()]
-                    .partial_cmp(&self.当量信息[y.to_usize()])
+                self.当量信息[x.hash()]
+                    .partial_cmp(&self.当量信息[y.hash()])
                     .unwrap()
             });
         }
@@ -451,7 +452,7 @@ impl 冰雪清韵编码器 {
         {
             编码信息.全码 = Self::全码规则(序列, 映射);
             编码信息.计重全码 = 编码信息.全码;
-            编码信息.计重索引 = 编码信息.全码.to_usize();
+            编码信息.计重索引 = 编码信息.全码.hash();
             编码信息.字根字 = 序列[1] == 0;
             if 编码信息.字根字 {
                 self.字根字序号.push(i);
@@ -469,7 +470,7 @@ impl 冰雪清韵编码器 {
         });
         let mut 字根字空间 = vec![Default::default(); 进制 as usize * 进制 as usize];
         for 编码 in &self.固定占用组合 {
-            字根字空间[编码.to_usize()] = 1;
+            字根字空间[编码.hash()] = 1;
         }
         let 补码键 = self.棱镜.键转数字[&决策.补码键] as 键;
         for 序号 in &self.字根字序号 {
@@ -492,7 +493,6 @@ impl 冰雪清韵编码器 {
                     字根字空间[编码信息.计重索引] = 1;
                 } else {
                     编码信息.计重全码[1] = 补码键;
-                    println!("字根字 {} 无法使用原码，改为补码", self.固定拆分[*序号].词);
                 }
             } else {
                 编码信息.计重全码[0] = 补码键;
@@ -501,7 +501,7 @@ impl 冰雪清韵编码器 {
             if 编码信息.简体 {
                 编码信息.简体简码 = 编码信息.计重全码;
             }
-            编码信息.计重索引 = 编码信息.计重全码.to_usize();
+            编码信息.计重索引 = 编码信息.计重全码.hash();
         }
     }
 
@@ -586,9 +586,9 @@ impl 冰雪清韵编码器 {
             }
             let mut 三级简码 = 编码信息.全码;
             三级简码[3] = 空格;
-            if !self.简体空间[三级简码.to_usize()] {
+            if !self.简体空间[三级简码.hash()] {
                 编码信息.简体简码 = 三级简码;
-                self.简体空间[三级简码.to_usize()] = true;
+                self.简体空间[三级简码.hash()] = true;
             }
         }
     }
@@ -604,13 +604,13 @@ impl 冰雪清韵编码器 {
             let 声码 = 映射[*声母].0;
             let 韵码 = 映射[*韵母].0;
             let 音码 = [0, 0, 声码, 韵码];
-            self.音码空间[音码.to_usize()] += *频率;
+            self.音码空间[音码.hash()] += *频率;
         }
     }
 }
 
 impl 编码器 for 冰雪清韵编码器 {
-    type 解类型 = 冰雪清韵决策;
+    type 决策 = 冰雪清韵决策;
     fn 编码(
         &mut self,
         决策: &冰雪清韵决策,

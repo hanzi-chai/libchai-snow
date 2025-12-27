@@ -1,10 +1,10 @@
 use chai::{
-    config::{Mapped, MappedKey},
-    optimizers::解特征,
-    元素, 棱镜,
+    config::{Mapped, MappedKey}, optimizers::决策, 元素, 棱镜
 };
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+
+use crate::common::转换;
 pub mod context;
 pub mod encoder;
 pub mod objective;
@@ -44,14 +44,8 @@ pub const 所有汉字数: usize = 20992;
 pub const 常用简繁范围: usize = 8536;
 pub const 无空格: bool = false;
 
-trait 转换 {
-    fn to_usize(&self) -> usize;
-
-    fn 编码空间大小() -> usize;
-}
-
 impl 转换 for 编码 {
-    fn to_usize(&self) -> usize {
+    fn hash(&self) -> usize {
         let k = 进制 as usize;
         let a = 空格 as usize;
         let result = self[0] as usize * a * a * k
@@ -273,6 +267,10 @@ impl 元素安排 {
                             }
                         }
                     }
+                    _ => {
+                        println!("无法从映射中恢复元素安排: {:?}", mapped);
+                        unreachable!()
+                    }
                 }
             }
             _ => {
@@ -359,12 +357,8 @@ impl 冰雪清韵决策变化 {
     }
 }
 
-impl 解特征 for 冰雪清韵决策 {
+impl 决策 for 冰雪清韵决策 {
     type 变化 = 冰雪清韵决策变化;
-
-    fn 单位元() -> Self::变化 {
-        冰雪清韵决策变化::无变化()
-    }
 
     fn 除法(旧变化: &Self::变化, 新变化: &Self::变化) -> Self::变化 {
         let mut 移动字根 = 旧变化.移动字根.clone();

@@ -20,6 +20,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 use serde_yaml::{from_str, to_string};
 use std::{
+    cmp::Reverse,
     fs::{File, read_to_string},
     io::Write,
     path::PathBuf,
@@ -61,7 +62,7 @@ pub struct 冰雪清韵上下文 {
 }
 
 impl 上下文 for 冰雪清韵上下文 {
-    type 解类型 = 冰雪清韵决策;
+    type 决策 = 冰雪清韵决策;
 
     fn 序列化(&self, 解: &冰雪清韵决策) -> String {
         let mut 新配置 = self.配置.clone();
@@ -114,7 +115,7 @@ impl 冰雪清韵上下文 {
         let 布局 = 输入.配置.form.clone();
         let 原始决策 = 布局.mapping;
         let 原始决策空间 = 布局.mapping_space.unwrap();
-        let 原始乱序生成器 = 布局.mapping_generator.unwrap();
+        let 原始乱序生成器 = 布局.mapping_generators.unwrap();
         let 原始乱序生成器 = 原始乱序生成器[0].clone();
         let mut 元素转数字 = FxHashMap::default();
         let mut 数字转元素 = FxHashMap::default();
@@ -317,7 +318,8 @@ impl 冰雪清韵上下文 {
                     }
                 }
                 // 第二主根
-                if 原始乱序生成器.elements.contains(&元素) {
+                let regex = Regex::new(&原始乱序生成器.regex).unwrap();
+                if regex.is_match(&元素) {
                     let 条件列表 = 安排列表
                         .iter()
                         .find(|x| matches!(x.安排, 元素安排::声母韵母 { .. }))
@@ -406,7 +408,7 @@ impl 冰雪清韵上下文 {
                     for c4 in 0..进制1 {
                         let mut s4 = s3.clone();
                         self.棱镜.数字转键.get(&(c4 as u64)).map(|z| s4.push(*z));
-                        let c = [c1, c2, c3, c4].to_usize();
+                        let c = [c1, c2, c3, c4].hash();
                         for range in [0..2, 1..3, 2..4, 0..3, 1..4, 0..4] {
                             if range.end > s4.len() {
                                 continue;
@@ -643,6 +645,8 @@ impl 冰雪清韵上下文 {
         let mut 大竹码表 = Vec::new();
         let mut 形码盒子测评码表 = Vec::new();
         let mut 未排序固态词典码表 = FxHashMap::default();
+        let mut 已占据编码 = FxHashSet::default();
+        let mut 当前最短码长 = FxHashMap::default();
         for (可编码对象, 编码信息) in self
             .固定拆分
             .iter()
@@ -650,23 +654,29 @@ impl 冰雪清韵上下文 {
             .sorted_by_key(|(_, x)| x.简体频序)
         {
             let 全码 = self.转编码(编码信息.计重全码);
+            if 可编码对象.gb2312 && 全码.len() == 3 {
+                已占据编码.insert(全码.clone());
+            }
             let 无空格全码 = 全码.replace("_", "");
             let 带空格全码 = 全码.replace("_", " ");
             let 简码 = self.转编码(编码信息.简体简码);
+            当前最短码长.insert(可编码对象.词, 简码.len());
             let 无空格简码 = 简码.replace("_", "");
             let 带空格简码 = 简码.replace("_", " ");
-            宇浩测评码表.push((可编码对象.词, 无空格全码.clone()));
+            宇浩测评码表.push((可编码对象.词.to_string(), 无空格全码.clone()));
             大竹码表.push((全码.clone(), 可编码对象.词.to_string()));
             形码盒子测评码表.push((可编码对象.词, 带空格全码.clone()));
-            未排序固态词典码表
-                .entry(无空格全码.clone())
-                .or_insert_with(Vec::new)
-                .push(可编码对象.词.to_string());
+            if 可编码对象.gb2312 {
+                未排序固态词典码表
+                    .entry(无空格全码.clone())
+                    .or_insert_with(Vec::new)
+                    .push(可编码对象.词.to_string());
+            }
             if !无空格简码.is_empty() && 无空格简码 != 无空格全码 {
-                宇浩测评码表.push((可编码对象.词, 无空格简码.clone()));
+                宇浩测评码表.push((可编码对象.词.to_string(), 无空格简码.clone()));
                 大竹码表.push((简码.clone(), 可编码对象.词.to_string()));
                 形码盒子测评码表.push((可编码对象.词, 带空格简码.clone()));
-                if self.转编码(编码信息.简体简码).len() > 1 {
+                if 可编码对象.gb2312 && self.转编码(编码信息.简体简码).len() > 1 {
                     未排序固态词典码表
                         .entry(无空格简码.clone())
                         .or_insert_with(Vec::new)
@@ -679,12 +689,18 @@ impl 冰雪清韵上下文 {
         for (字, 拆分) in 拆分结果 {
             大竹码表.push((format!("拆分［{}］", 拆分.clone()), 字));
         }
-        self.后处理固态词典码表(&mut 未排序固态词典码表, &mut 大竹码表);
-        let re1 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]$").unwrap();
+        self.后处理固态词典码表(
+            &mut 未排序固态词典码表,
+            &mut 大竹码表,
+            &mut 宇浩测评码表,
+            &mut 已占据编码,
+            &当前最短码长,
+        );
+        let re1 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]_?$").unwrap();
         let re2 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy][aoeiu;,./]$").unwrap();
-        let re3 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{2}$").unwrap();
+        let re3 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{2}_?$").unwrap();
         let re4 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{2}[aoeiu;,./]$").unwrap();
-        let re5 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{3}$").unwrap();
+        let re5 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{3}_?$").unwrap();
         let re6 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{3}[aoeiu;,./]$").unwrap();
         let re7 = Regex::new(r"^[bpmfdtnlgkhjqxzcsrvwy]{4}$").unwrap();
         let res = vec![re1, re2, re3, re4, re5, re6, re7];
@@ -693,22 +709,149 @@ impl 冰雪清韵上下文 {
             .sorted_by_key(|(编码字符串, _)| self.排序编码(&res, &编码字符串))
             .map(|(字符串, 词列表)| (字符串, 词列表.join(" ")))
             .collect();
+        大竹码表.sort_by_key(|(code, _)| self.排序编码(&res, code));
         写入文本文件(目录.join("冰雪清韵.txt"), 宇浩测评码表);
         写入文本文件(目录.join("大竹码表.txt"), 大竹码表);
         写入文本文件(目录.join("形码盒子测评码表.txt"), 形码盒子测评码表);
         写入文本文件(目录.join("snow_qingyun.fixed.txt"), 固态词典码表);
     }
 
+    fn 读取简词(
+        &self,
+    ) -> (
+        Vec<(String, String, u64)>,
+        FxHashMap<(char, char), Vec<String>>,
+    ) {
+        let 拼音: Vec<(String, String, String, u64)> = 读取文本文件("data/pinyin.txt".into());
+        let mut 声韵映射 = FxHashMap::default();
+        for (全拼, 声母, 韵母, _) in 拼音 {
+            let 声母 = format!("声-{}", 声母);
+            let 元素安排::键位(声母按键) = self.初始决策.元素[self.棱镜.元素转数字[&声母]]
+            else {
+                panic!("声母 {} 不是键位安排", 声母);
+            };
+            let 韵母 = format!("韵-{}", 韵母);
+            let 元素安排::键位(韵母按键) = self.初始决策.元素[self.棱镜.元素转数字[&韵母]]
+            else {
+                panic!("韵母 {} 不是键位安排", 韵母);
+            };
+            声韵映射.insert(全拼, (声母按键, 韵母按键));
+        }
+        let 简词列表: Vec<(String, String, u64)> = 读取文本文件("data/简词.txt".into());
+        let mut 简词编码列表 = vec![];
+        for (简词, 全拼列表, 词频) in 简词列表 {
+            let 全拼列表: Vec<_> = 全拼列表
+                .split(' ')
+                .map(|x| x[..(x.len() - 1)].to_string())
+                .collect();
+            let 编码1 = 声韵映射[&全拼列表[0]].0;
+            let 编码2 = 声韵映射[&全拼列表[1]].0;
+            let 编码3 = 声韵映射[&全拼列表[1]].1;
+            let 编码: String = [编码1, 编码2, 编码3].iter().collect();
+            简词编码列表.push((简词, 编码, 词频));
+        }
+        let mut 简词编码排序 = FxHashMap::default();
+        for 第一码 in 大集合 {
+            for 第二码 in 大集合 {
+                let pair = (第一码, 第二码);
+                let mut list = vec![];
+                for &第三码 in &小集合[1..] {
+                    let 编码: String = vec![第一码, 第二码, 第三码].iter().collect();
+                    list.push(编码);
+                }
+                list.sort_by_key(|code| (self.原始当量信息[code] * 100.0) as u64);
+                简词编码排序.insert(pair, list);
+            }
+        }
+        (简词编码列表, 简词编码排序)
+    }
+
     pub fn 后处理固态词典码表(
         &self,
         固态词典码表: &mut FxHashMap<String, Vec<String>>,
         大竹码表: &mut Vec<(String, String)>,
+        宇浩测评码表: &mut Vec<(String, String)>,
+        已占据编码: &mut FxHashSet<String>,
+        当前最短码长: &FxHashMap<char, usize>,
     ) {
         let 简码覆盖: 简码覆盖 = from_str(&read_to_string("data/override.yaml").unwrap()).unwrap();
-        for (简词, 编码) in 简码覆盖.简词快符 {
+        let (mut 简词编码列表, _) = self.读取简词();
+        简词编码列表.sort_by_key(|(简词, _, 词频)| {
+            let chars: Vec<_> = 简词.chars().collect();
+            let total_length = 当前最短码长[&chars[0]] + 当前最短码长[&chars[1]];
+            Reverse((total_length as i64 - 3) * (*词频 as i64))
+        });
+        // let 词频映射: FxHashMap<String, u64> = 简词编码列表
+        //     .iter()
+        //     .map(|(简词, _, 词频)| (简词.clone(), *词频))
+        //     .collect();
+        for (简词, 编码) in 简码覆盖.简词快符.clone() {
             固态词典码表.insert(编码.clone(), vec![简词.clone()]);
-            大竹码表.push((编码.clone(), 简词.clone()));
         }
+        let mut 简词映射 = FxHashMap::default();
+        for (词, 编码) in 简码覆盖.二简词.clone() {
+            assert!(!已占据编码.contains(&编码), "简词 {词} 的 {编码} 已被占据",);
+            简词映射.insert(编码.clone(), 词.clone());
+            已占据编码.insert(编码.clone());
+        }
+        let mut 未编码简词列表 = vec![];
+        let mut 自动简词 = 0;
+        for (简词, 编码, _) in 简词编码列表.iter() {
+            // 跳过一简词
+            if 简码覆盖.简词快符.iter().any(|(s, _)| s == 简词) {
+                continue;
+            }
+            // 跳过已手动编码的二简词
+            if 简码覆盖.二简词.contains_key(简词) {
+                continue;
+            }
+            let chars: Vec<_> = 简词.chars().collect();
+            let total_length = 当前最短码长[&chars[0]] + 当前最短码长[&chars[1]];
+            if total_length <= 3 {
+                println!(
+                    "简词 {} 的编码 {} 被跳过，因为其两字的最短码长之和为 {}",
+                    简词, 编码, total_length
+                );
+                continue;
+            }
+            if 已占据编码.contains(编码) {
+                未编码简词列表.push((简词, 编码));
+                continue;
+            }
+            自动简词 += 1;
+            简词映射.insert(编码.clone(), 简词.clone());
+            已占据编码.insert(编码.clone());
+        }
+        println!(
+            "二简词编码分配完成：手动 {} 个，自动 {} 个，共 {} 个",
+            简码覆盖.二简词.len(),
+            自动简词,
+            简码覆盖.二简词.len() + 自动简词
+        );
+        println!(
+            "未能分配编码的二简词前 100：{:?}",
+            未编码简词列表.iter().take(100).collect::<Vec<_>>()
+        );
+        for (编码, 简词) in 简词映射.clone() {
+            固态词典码表
+                .entry(编码.clone())
+                .or_insert_with(Vec::new)
+                .insert(0, 简词.clone());
+        }
+        let mut 大竹码表增加 = vec![];
+        let mut 宇浩码表增加 = vec![];
+        for (简词, 编码) in 简码覆盖.简词快符 {
+            大竹码表增加.push((编码.clone(), 简词.clone()));
+            宇浩码表增加.push((简词.clone(), 编码.clone()));
+        }
+        for (编码, 简词) in 简词映射 {
+            大竹码表增加.push((编码.clone(), 简词.clone()));
+            宇浩码表增加.push((简词.clone(), 编码.clone()));
+        }
+        大竹码表增加.sort_by_key(|(code, _)| self.排序编码(&vec![], code));
+        宇浩码表增加.sort_by_key(|(_, code)| self.排序编码(&vec![], code));
+        大竹码表.splice(0..0, 大竹码表增加);
+        宇浩测评码表.splice(0..0, 宇浩码表增加);
         let 数字信息 = [
             ('1', '一', "yi"),
             ('2', '二', "vi"),

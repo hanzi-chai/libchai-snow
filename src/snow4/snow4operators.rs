@@ -1,11 +1,10 @@
 //! 冰雪四拼手机键位布局的优化问题。
 //!
 
-use chai::{
-    operators::变异,
-    {元素, 元素映射, 键},
-};
 use chai::contexts::default::默认上下文;
+use chai::optimizers::决策;
+use chai::operators::变异;
+use chai::{元素, 键};
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
@@ -18,10 +17,20 @@ pub struct 冰雪四拼操作 {
     键转数字: FxHashMap<char, 键>,
 }
 
-impl 变异 for 冰雪四拼操作 {
-    type 解类型 = 元素映射;
+#[derive(Clone)]
+pub struct 元素映射(Vec<键>);
 
-    fn 变异(&mut self, 映射: &mut 元素映射) -> Vec<元素> {
+impl 决策 for 元素映射 {
+    type 变化 = ();
+    fn 除法(_旧变化: &Self::变化, _新变化: &Self::变化) -> Self::变化 {
+        ()
+    }
+}
+
+impl 变异 for 冰雪四拼操作 {
+    type 决策 = 元素映射;
+
+    fn 变异(&mut self, 映射: &mut 元素映射) {
         let index1 = self.index % self.group1.len();
         let index2 = (self.index / self.group1.len()) % self.group2.len();
         let index3 = (self.index / self.group1.len() / self.group2.len()) % self.group3.len();
@@ -41,21 +50,20 @@ impl 变异 for 冰雪四拼操作 {
         {
             for (j, element) in elements.iter().enumerate() {
                 let repr = self.元素转数字[&element.to_string()];
-                映射[repr] = self.键转数字[&info1[i][j]];
+                映射.0[repr] = self.键转数字[&info1[i][j]];
             }
         }
         // r, l, f
         for (i, element) in vec!["r", "l", "f"].into_iter().enumerate() {
             let repr = self.元素转数字[element];
-            映射[repr] = self.键转数字[&info2[i]];
+            映射.0[repr] = self.键转数字[&info2[i]];
         }
         // a, e, i, o, u
         for (i, element) in vec!["a", "e", "i", "o", "u"].into_iter().enumerate() {
             let repr = self.元素转数字[element];
-            映射[repr] = self.键转数字[&info3[i]];
+            映射.0[repr] = self.键转数字[&info3[i]];
         }
         self.index += 1;
-        vec![]
     }
 }
 

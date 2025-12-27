@@ -4,9 +4,8 @@ use crate::qingyun::{
 };
 use chai::{operators::变异, 元素, 棱镜};
 use rand::{
-    random,
-    seq::{IteratorRandom, SliceRandom},
-    thread_rng,
+    random, rng,
+    seq::{IndexedRandom, IteratorRandom},
 };
 use rustc_hash::FxHashMap;
 use std::collections::VecDeque;
@@ -19,7 +18,7 @@ pub struct 冰雪清韵操作 {
 }
 
 impl 变异 for 冰雪清韵操作 {
-    type 解类型 = 冰雪清韵决策;
+    type 决策 = 冰雪清韵决策;
     fn 变异(&mut self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
         let 随机数: f64 = random();
         let mut 变化 = if 随机数 < 0.05 {
@@ -71,7 +70,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 改变补码键(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         决策.补码键 = 大集合
             .into_iter()
             .filter(|x| !不好的大集合键.contains(x))
@@ -83,7 +82,7 @@ impl 冰雪清韵操作 {
     fn _改变第一主根小码(
         &self, 决策: &mut 冰雪清韵决策
     ) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         决策.第一主根 = 主根小码.into_iter().choose(&mut rng).unwrap();
         冰雪清韵决策变化::全局变化()
     }
@@ -91,13 +90,13 @@ impl 冰雪清韵操作 {
     fn _改变第二主根小码(
         &self, 决策: &mut 冰雪清韵决策
     ) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         决策.第二主根 = ['o', 'u', ';'].into_iter().choose(&mut rng).unwrap();
         冰雪清韵决策变化::全局变化()
     }
 
     fn _移动声母(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let (声母, 安排列表) = self
             .决策空间
             .声母
@@ -111,7 +110,7 @@ impl 冰雪清韵操作 {
     }
 
     fn _移动韵母(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut 备选列表 = vec![];
         for 韵母 in &self.决策空间.韵母 {
             // if 鼻音韵母列表.contains(韵母) {
@@ -134,7 +133,7 @@ impl 冰雪清韵操作 {
     }
 
     fn _交换韵母(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let 非鼻音韵母列表 =
             ["韵-ai", "韵-ei", "韵-ao", "韵-ou", "韵-ü"].map(|s| self._棱镜.元素转数字[s]);
         let 鼻音韵母列表 = ["韵-an", "韵-en", "韵-ang", "韵-eng"].map(|s| self._棱镜.元素转数字[s]);
@@ -199,7 +198,7 @@ impl 冰雪清韵操作 {
                         self.决策空间.元素[元素]
                     );
                 } else {
-                    let 新安排 = 新安排列表.choose(&mut thread_rng()).unwrap();
+                    let 新安排 = 新安排列表.choose(&mut rng()).unwrap();
                     if 决策.元素[元素] == 元素安排::未选取 {
                         变化.增加字根.push(元素);
                     } else if 新安排 == &元素安排::未选取 {
@@ -219,7 +218,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 产生副根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut 备选列表 = vec![];
         for 字根 in &self.决策空间.字根 {
             let 安排 = 决策.元素[*字根];
@@ -249,7 +248,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 湮灭副根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut 备选列表 = vec![];
         for 字根 in &self.决策空间.字根 {
             let 安排 = &决策.元素[*字根];
@@ -274,7 +273,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 移动副根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut 备选列表 = vec![];
         for 字根 in &self.决策空间.字根 {
             let 安排 = 决策.元素[*字根];
@@ -310,7 +309,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 交换主副根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut 备选列表 = vec![];
         for 字根 in &self.决策空间.字根 {
             let 安排 = 决策.元素[*字根];
@@ -372,7 +371,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 移动笔画(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let 字根 = *self.笔画列表.choose(&mut rng).unwrap();
         let 安排 = self.决策空间.元素[字根]
             .iter()
@@ -384,7 +383,7 @@ impl 冰雪清韵操作 {
     }
 
     fn 交换主根(&self, 决策: &mut 冰雪清韵决策) -> 冰雪清韵决策变化 {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let 主根列表: Vec<_> = self
             .决策空间
             .字根
