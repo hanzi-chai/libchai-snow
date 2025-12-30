@@ -1,13 +1,9 @@
 pub mod encoder;
 pub mod objective;
 pub mod operators;
-use crate::common::{转换, 键盘布局};
+use crate::common::转换;
 use chai::{
-    config::{Mapped, 配置},
-    contexts::{上下文, 合并初始决策, 拓扑排序},
-    interfaces::默认输入,
-    optimizers::决策,
-    元素, 棱镜,
+    config::{Mapped, 配置}, contexts::{上下文, 合并初始决策, 拓扑排序}, interfaces::默认输入, objectives::metric::键盘布局, optimizers::决策, 元素, 棱镜
 };
 use chrono::Local;
 use indexmap::IndexMap;
@@ -26,6 +22,7 @@ pub const 大集合: [char; 大] = [
 pub const 小集合: [char; 小] = ['a', 'o', 'e', 'i', 'u', ';', '/'];
 pub type 键 = u8;
 pub type 编码 = [键; 5];
+pub const 空格: 键 = 31;
 
 impl 转换 for 编码 {
     fn hash(&self) -> usize {

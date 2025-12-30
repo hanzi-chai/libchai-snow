@@ -1,8 +1,8 @@
-use crate::{common::键盘布局, qingyun::{
+use crate::{qingyun::{
     context::冰雪清韵上下文, encoder::冰雪清韵编码器, 元素安排, 冰雪清韵决策, 冰雪清韵决策变化,
     冰雪清韵决策空间, 大集合, 所有汉字数, 转换, 进制, 音节信息, 频序, 频率,
 }};
-use chai::{encoders::编码器, objectives::目标函数, 棱镜, 键位分布信息};
+use chai::{encoders::编码器, objectives::{metric::键盘布局, 目标函数}, 棱镜, 键位分布信息};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::{fmt::Display, iter::zip};
