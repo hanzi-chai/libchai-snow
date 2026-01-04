@@ -2,21 +2,28 @@ pub mod encoder;
 pub mod objective;
 pub mod operators;
 use crate::{
-    common::转换, feihua::encoder::冰雪飞花编码信息, qingyun::context::写入文本文件
+    common::{get_pua_mapper, 转换},
+    feihua::encoder::{冰雪飞花编码信息, 冰雪飞花编码器},
+    qingyun::context::写入文本文件,
 };
 use chai::{
-    config::{Mapped, 配置},
+    config::{Mapped, MappedKey, 配置},
     contexts::{上下文, 合并初始决策, 展开变量, 拓扑排序, 条件, 条件安排},
     interfaces::默认输入,
+    objectives::metric::指法标记,
     optimizers::决策,
-    元素, 棱镜, 码表项,
+    元素, 棱镜, 码表项, 错误,
 };
 use chrono::Local;
 use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use serde_yaml::{from_str, to_string};
-use std::fs::read_to_string;
+use std::{
+    fs::{File, read_to_string},
+    path::PathBuf,
+};
+use std::{io::Write, iter::zip};
 
 pub const 大: usize = 20;
 pub const 小: usize = 8;
@@ -49,10 +56,11 @@ impl 转换 for 编码 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum 冰雪飞花安排 {
     键位(键),
     归并(元素),
+    未选取,
 }
 
 impl 冰雪飞花安排 {
@@ -63,9 +71,14 @@ impl 冰雪飞花安排 {
                 let 键 = 棱镜.键转数字[&字母] as 键;
                 冰雪飞花安排::键位(键)
             }
-            Mapped::Grouped { element } => {
-                冰雪飞花安排::归并(棱镜.元素转数字[element])
+            Mapped::Advanced(keys) => {
+                let MappedKey::Ascii(字母) = keys[0] else {
+                    panic!("Unexpected key type");
+                };
+                let 键 = 棱镜.键转数字[&字母] as 键;
+                冰雪飞花安排::键位(键)
             }
+            Mapped::Grouped { element } => 冰雪飞花安排::归并(棱镜.元素转数字[element]),
             _ => unreachable!(),
         }
     }
@@ -96,6 +109,9 @@ impl 冰雪飞花决策 {
                 }
                 冰雪飞花安排::归并(元素) => {
                     编码列表[i] = 编码列表[*元素];
+                }
+                冰雪飞花安排::未选取 => {
+                    编码列表[i] = 0;
                 }
             }
         }
@@ -152,6 +168,7 @@ impl 上下文 for 冰雪飞花上下文 {
                     let element = self.棱镜.数字转元素[&元素].clone();
                     mapping.insert(元素名称, Mapped::Grouped { element });
                 }
+                冰雪飞花安排::未选取 => {}
             }
         }
         新配置.form.mapping = mapping;
@@ -190,7 +207,7 @@ impl 冰雪飞花上下文 {
         let 原始变量映射 = 布局.mapping_variables.unwrap_or_default();
         合并初始决策(&mut 原始决策空间, &原始决策);
         展开变量(&mut 原始决策空间, &原始变量映射);
-        let (所有元素, _) = 拓扑排序(&原始决策空间).unwrap();
+        let (所有元素, 元素图) = 拓扑排序(&原始决策空间).unwrap();
         let mut 元素转数字 = FxHashMap::default();
         let mut 数字转元素 = FxHashMap::default();
         let mut 键转数字 = FxHashMap::default();
@@ -207,7 +224,7 @@ impl 冰雪飞花上下文 {
             键转数字.insert(键, 序号 as u64);
             数字转键.insert(序号 as u64, 键);
         }
-        for 元素名称 in 所有元素 {
+        for 元素名称 in &所有元素 {
             序号 += 1;
             元素转数字.insert(元素名称.clone(), 序号);
             数字转元素.insert(序号, 元素名称.clone());
@@ -301,6 +318,23 @@ impl 冰雪飞花上下文 {
             }
         }
         信息列表.sort_by_key(|x| std::cmp::Reverse(x.频率));
+        // 如果一个元素没有被用作部首，而且也没有被别的元素依赖，则可以设为未选取
+        for 元素名称 in 所有元素 {
+            if 元素名称.starts_with("声-") {
+                continue;
+            }
+            let 元素 = 棱镜.元素转数字[&元素名称];
+            let 被依赖 = 元素图[&元素名称].len() > 0;
+            let 是部首 = 信息列表.iter().any(|x| x.部首 == 元素);
+            if !被依赖 && !是部首 {
+                println!("元素 {:?} 未被依赖且不是部首，可以设为未选取", 元素名称);
+                决策空间.元素空间[元素].push(条件安排 {
+                    条件: vec![],
+                    安排: 冰雪飞花安排::未选取,
+                    分数: 0.0,
+                });
+            }
+        }
         Self {
             配置: 输入.配置.clone(),
             初始决策,
@@ -311,7 +345,7 @@ impl 冰雪飞花上下文 {
         }
     }
 
-    pub fn 生成码表(&self, 编码结果: &Vec<冰雪飞花编码信息>) {
+    pub fn 生成码表(&self, 编码结果: &Vec<冰雪飞花编码信息>) -> Vec<码表项> {
         let mut 码表: Vec<码表项> = Vec::new();
         let 转编码 = |code: 编码| {
             code.0
@@ -330,7 +364,126 @@ impl 冰雪飞花上下文 {
             };
             码表.push(码表项);
         }
-        码表.sort_by_key(|x| (x.name.chars().next().unwrap(), x.full.clone()));
-        写入文本文件("feihua/code.txt".into(), 码表);
+        码表
+    }
+
+    pub fn 生成拆分表(&self, 编码器: &冰雪飞花编码器) -> Vec<(String, String)> {
+        let mut 拆分表 = vec![];
+        let 映射 = get_pua_mapper();
+        for (拆分序列, 信息) in zip(编码器.拆分序列.iter(), 编码器.汉字信息.iter())
+        {
+            let mut 序列 = vec![];
+            if 信息.部首 == 0 {
+                for 字根 in &拆分序列[1..] {
+                    if *字根 != 0 {
+                        序列.push(self.棱镜.数字转元素[字根].clone());
+                    }
+                }
+            } else {
+                序列.push(self.棱镜.数字转元素[&拆分序列[1]].clone());
+                序列.push("・".to_string());
+                if 信息.字块[1] == usize::MAX {
+                    for 字根 in &拆分序列[2..] {
+                        if *字根 != 0 {
+                            序列.push(self.棱镜.数字转元素[字根].clone());
+                        }
+                    }
+                } else {
+                    序列.push(self.棱镜.数字转元素[&拆分序列[2]].clone());
+                    序列.push("・".to_string());
+                    序列.push(self.棱镜.数字转元素[&拆分序列[3]].clone());
+                }
+            }
+            let 序列: String = 序列
+                .into_iter()
+                .map(|x| x.chars().next().unwrap())
+                .map(|x| 映射.get(&x).cloned().unwrap_or(x))
+                .collect();
+            拆分表.push((信息.汉字.to_string(), 序列));
+        }
+        拆分表
+    }
+
+    pub fn 输出码表(
+        &self,
+        输出目录: &PathBuf,
+        码表: &Vec<码表项>,
+        拆分表: &Vec<(String, String)>,
+    ) -> Result<(), 错误> {
+        let 码表路径 = 输出目录.join("code.txt");
+        写入文本文件(码表路径, 码表);
+        let mut 大竹码表 = vec![];
+        for 码表项 in 码表 {
+            大竹码表.push((format!("({})", 码表项.full.clone()), 码表项.name.clone()));
+        }
+        for 拆分项 in 拆分表 {
+            大竹码表.push((拆分项.1.clone(), 拆分项.0.clone()));
+        }
+        let 大竹码表路径 = 输出目录.join("dazhu.txt");
+        写入文本文件(大竹码表路径, &大竹码表);
+        Ok(())
+    }
+
+    // 分析前 3000 字中全码重码和简码差指法的情况
+    pub fn 分析码表(
+        &self,
+        编码结果: &[冰雪飞花编码信息],
+        码表: &[码表项],
+        路径: &PathBuf,
+    ) -> Result<(), 错误> {
+        let 指法标记 = 指法标记::new();
+        let mut 文件 = File::create(路径).unwrap();
+        // 全码 -> 词列表的映射
+        let mut 翻转码表 = FxHashMap::default();
+        let 一字总频率: u64 = 编码结果.iter().map(|x| x.频率).sum();
+        for (序号, 码表项) in 码表.iter().enumerate() {
+            let 百万分之频率 = (编码结果[序号].频率 as f64 / 一字总频率 as f64) * 1_000_000.0;
+            翻转码表
+                .entry(码表项.full.clone())
+                .or_insert_with(|| vec![])
+                .push((码表项.name.clone(), 百万分之频率 as u64));
+        }
+        let mut 差指法 = vec![];
+        for 码表项 in 码表.iter().take(2000) {
+            let actual = 码表项.full.clone();
+            for 键索引 in 0..(actual.len() - 1) {
+                let 组合 = (
+                    actual.chars().nth(键索引).unwrap(),
+                    actual.chars().nth(键索引 + 1).unwrap(),
+                );
+                if 指法标记.同指大跨排.contains(&组合) || 指法标记.错手.contains(&组合)
+                {
+                    差指法.push((码表项.name.clone(), actual.clone()));
+                }
+            }
+        }
+        let mut 重码 = vec![];
+        for 码表项 in 码表.iter().take(4000) {
+            let 是重码 = 码表项.full_rank != 0;
+            if 是重码 {
+                let mut 完整重码组 = 翻转码表[&码表项.full].clone();
+                let 位置 = 完整重码组
+                    .iter()
+                    .position(|(x, _)| x == &码表项.name)
+                    .unwrap();
+                let 百万分之频率 = 完整重码组[位置].1;
+                完整重码组.resize(位置, ("".to_string(), 0));
+                重码.push((
+                    码表项.name.clone(),
+                    码表项.full.clone(),
+                    百万分之频率,
+                    完整重码组,
+                ));
+            }
+        }
+        writeln!(文件, "# 前 4000 中重码\n")?;
+        for (name, code, frequency, names) in 重码 {
+            writeln!(文件, "- {name} {code} {frequency}μ：{names:?}")?;
+        }
+        writeln!(文件, "\n# 前 2000 中差指法项\n")?;
+        for (name, code) in 差指法 {
+            writeln!(文件, "- {name} {code}")?;
+        }
+        Ok(())
     }
 }

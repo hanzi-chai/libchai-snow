@@ -3,14 +3,16 @@ use chai::interfaces::command_line::{
     从命令行参数创建, 命令, 命令行, 默认命令行参数
 };
 use chai::objectives::目标函数;
+use chai::contexts::上下文;
 use chai::错误;
 use clap::Parser;
 use snow::feihua::encoder::冰雪飞花编码器;
 use snow::feihua::objective::冰雪飞花目标函数;
 use snow::feihua::operators::冰雪飞花操作;
 use snow::feihua::冰雪飞花上下文;
-use std::fs::File;
+use std::fs::{File, write};
 use std::io::Write;
+use std::path::PathBuf;
 use std::thread::spawn;
 
 fn main() -> Result<(), 错误> {
@@ -22,7 +24,11 @@ fn main() -> Result<(), 错误> {
             let 编码器 = 冰雪飞花编码器::新建(&上下文);
             let mut 目标函数 = 冰雪飞花目标函数::新建(&上下文, 编码器);
             let (指标, 分数) = 目标函数.计算(&上下文.初始决策, &None);
-            上下文.生成码表(&目标函数.编码器.编码结果);
+            let 码表 = 上下文.生成码表(&目标函数.编码器.编码结果);
+            let 拆分表 = 上下文.生成拆分表(&目标函数.编码器);
+            let 初始决策 = 上下文.序列化(&上下文.初始决策);
+            write(PathBuf::from("feihua/initial.yaml"), 初始决策)?;
+            上下文.输出码表(&"feihua/".into(), &码表, &拆分表)?;
             println!("分数：{分数:.4}；{指标}");
         }
         命令::Optimize { threads, .. } => {
@@ -46,6 +52,12 @@ fn main() -> Result<(), 错误> {
                         &上下文,
                         &子命令行,
                     );
+                    let 码表 = 上下文.生成码表(&目标函数.编码器.编码结果);
+                    let 拆分表 = 上下文.生成拆分表(&目标函数.编码器);
+                    上下文
+                        .分析码表(&目标函数.编码器.编码结果, &码表, &子命令行.输出目录.join("分析.md"))
+                        .unwrap();
+                    上下文.输出码表(&子命令行.输出目录, &码表, &拆分表).unwrap();
                     return 优化结果;
                 });
                 线程池.push(线程);

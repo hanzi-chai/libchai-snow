@@ -62,14 +62,30 @@ impl 冰雪飞花编码器 {
             let mut found = false;
             for 拆分方式 in 拆分方式列表.iter() {
                 // 找到一个所有字根都在小集合内的拆分方式
-                if 拆分方式.iter().all(|&x| 决策[x] as usize <= 小) {
+                if 拆分方式.iter().all(|&x| {
+                    if x == 0 {
+                        return true;
+                    }
+                    let c = 决策[x] as usize;
+                    c <= 小 && c != 0
+                }) {
                     *指针 = *拆分方式;
                     found = true;
                     break;
                 }
             }
             if !found {
-                panic!("无法为拆分项 {:?} 找到合适的拆分方式", 拆分方式列表);
+                panic!(
+                    "无法为拆分项 {:?} 找到合适的拆分方式",
+                    拆分方式列表
+                        .iter()
+                        .map(|x| x.map(|y| if y == 0 {
+                            "".into()
+                        } else {
+                            self.棱镜.数字转元素[&y].clone()
+                        }))
+                        .collect::<Vec<_>>()
+                );
             }
         }
         for (输出, 信息) in zip(&mut self.拆分序列, &self.汉字信息) {
@@ -109,7 +125,10 @@ impl 冰雪飞花编码器 {
             输出.全码 = Self::全码规则(序列, 决策);
             let hash = 输出.全码.hash();
             if hash >= self.编码空间.len() {
-                panic!("编码：{:?} 超出编码空间范围，当前序列：{:?}", 输出.全码, 序列);
+                panic!(
+                    "编码：{:?} 超出编码空间范围，当前序列：{:?}",
+                    输出.全码, 序列
+                );
             }
             输出.选重 = self.编码空间[hash] > 0;
             输出.候选位置 = self.编码空间[hash];
