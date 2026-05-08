@@ -182,7 +182,7 @@ impl 冰雪二拼缓存 {
         索引: usize,
         频数: u64,
         编码: 编码,
-        选重标记: bool,
+        选重标记: u8,
         参数: &默认目标函数参数,
         正负号: i64,
     ) {
@@ -208,7 +208,7 @@ impl 冰雪二拼缓存 {
             self.总组合当量 += 参数.当量信息[编码 as usize] * 有向频数 as f64;
         }
         // 离散
-        if 选重标记 {
+        if 选重标记 > 0 {
             if 类型 != 多字全码 {
                 if 类型 == 一字全码 {
                     self.一字全码总选重频数 += 有向频数;
@@ -236,11 +236,11 @@ impl 冰雪二拼缓存 {
             .collect();
         let mut 距离 = 0.0;
         for (frequency, loss) in zip(&分布, &参数.键位分布信息) {
-            let diff = frequency - loss.ideal;
+            let diff = frequency - loss.理想值;
             if diff > 0.0 {
-                距离 += loss.gt_penalty * diff;
+                距离 += loss.低于惩罚 * diff;
             } else {
-                距离 -= loss.lt_penalty * diff;
+                距离 -= loss.高于惩罚 * diff;
             }
         }
         let mut 按键分布 = HashMap::new();
@@ -286,8 +286,8 @@ impl 冰雪二拼缓存 {
 }
 
 pub struct 冰雪二拼目标函数 {
-    参数: 默认目标函数参数,
-    缓存: 冰雪二拼缓存,
+    _参数: 默认目标函数参数,
+    _缓存: 冰雪二拼缓存,
     编码器: 冰雪二拼编码器,
 }
 
@@ -306,9 +306,9 @@ impl 冰雪二拼目标函数 {
             正则化强度: 1.0,
         };
         Ok(Self {
-            参数,
+            _参数: 参数,
             编码器,
-            缓存: 冰雪二拼缓存::新建(上下文.棱镜.进制),
+            _缓存: 冰雪二拼缓存::新建(上下文.棱镜.进制),
         })
     }
 }

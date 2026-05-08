@@ -1,5 +1,7 @@
 use chai::{
-    config::{Mapped, MappedKey}, optimizers::决策, 元素, 棱镜
+    config::{安排, 广义码位},
+    optimizers::决策,
+    元素, 棱镜,
 };
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -212,7 +214,7 @@ pub enum 元素安排 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct 条件元素安排 {
     pub 安排: 元素安排,
-    pub 条件列表: Vec<条件>,
+    pub 条件列表: Vec<冰雪清韵条件>,
     pub 打分: f64,
 }
 
@@ -227,34 +229,34 @@ impl From<元素安排> for 条件元素安排 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct 条件 {
+pub struct 冰雪清韵条件 {
     pub 元素: 元素,
     pub 谓词: bool,
     pub 值: 元素安排,
 }
 
 impl 元素安排 {
-    fn from(mapped: &Mapped, 棱镜: &棱镜) -> Self {
+    fn from(mapped: &安排, 棱镜: &棱镜) -> Self {
         match mapped {
-            Mapped::Unused(()) => 元素安排::未选取,
-            Mapped::Grouped { element } => 元素安排::归并(棱镜.元素转数字[element]),
-            Mapped::Advanced(keys) => {
+            安排::Unused(()) => 元素安排::未选取,
+            安排::Grouped { element } => 元素安排::归并(棱镜.元素转数字[element]),
+            安排::Advanced(keys) => {
                 let first = keys[0].clone();
-                let MappedKey::Reference {
+                let 广义码位::Reference {
                     element: element1, ..
                 } = keys[1].clone()
                 else {
                     unreachable!();
                 };
                 match first {
-                    MappedKey::Ascii(key) => {
+                    广义码位::Ascii(key) => {
                         if element1 == "主根-1" {
                             元素安排::键位第一(key)
                         } else {
                             元素安排::键位第二(key)
                         }
                     }
-                    MappedKey::Reference { element, .. } => {
+                    广义码位::Reference { element, .. } => {
                         if element.starts_with("声") {
                             元素安排::声母韵母 {
                                 声母: 棱镜.元素转数字[&element],
@@ -280,43 +282,43 @@ impl 元素安排 {
         }
     }
 
-    fn to_mapped(&self, 棱镜: &棱镜) -> Mapped {
+    fn to_mapped(&self, 棱镜: &棱镜) -> 安排 {
         match self {
-            元素安排::未选取 => Mapped::Unused(()),
-            元素安排::键位(键位) => Mapped::Basic(键位.to_string()),
-            元素安排::归并(字根) => Mapped::Grouped {
+            元素安排::未选取 => 安排::Unused(()),
+            元素安排::键位(键位) => 安排::Basic(键位.to_string()),
+            元素安排::归并(字根) => 安排::Grouped {
                 element: 棱镜.数字转元素[&字根].clone(),
             },
-            元素安排::归并韵母 { 字根, 韵母 } => Mapped::Advanced(vec![
-                MappedKey::Reference {
+            元素安排::归并韵母 { 字根, 韵母 } => 安排::Advanced(vec![
+                广义码位::Reference {
                     element: 棱镜.数字转元素[&字根].clone(),
                     index: 0,
                 },
-                MappedKey::Reference {
+                广义码位::Reference {
                     element: 棱镜.数字转元素[&韵母].clone(),
                     index: 0,
                 },
             ]),
-            元素安排::键位第一(键位) => Mapped::Advanced(vec![
-                MappedKey::Ascii(*键位),
-                MappedKey::Reference {
+            元素安排::键位第一(键位) => 安排::Advanced(vec![
+                广义码位::Ascii(*键位),
+                广义码位::Reference {
                     element: "主根-1".to_string(),
                     index: 0,
                 },
             ]),
-            元素安排::键位第二(键位) => Mapped::Advanced(vec![
-                MappedKey::Ascii(*键位),
-                MappedKey::Reference {
+            元素安排::键位第二(键位) => 安排::Advanced(vec![
+                广义码位::Ascii(*键位),
+                广义码位::Reference {
                     element: "主根-2".to_string(),
                     index: 0,
                 },
             ]),
-            元素安排::声母韵母 { 声母, 韵母 } => Mapped::Advanced(vec![
-                MappedKey::Reference {
+            元素安排::声母韵母 { 声母, 韵母 } => 安排::Advanced(vec![
+                广义码位::Reference {
                     element: 棱镜.数字转元素[&声母].clone(),
                     index: 0,
                 },
-                MappedKey::Reference {
+                广义码位::Reference {
                     element: 棱镜.数字转元素[&韵母].clone(),
                     index: 0,
                 },

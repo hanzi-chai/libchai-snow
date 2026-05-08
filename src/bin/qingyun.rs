@@ -1,4 +1,4 @@
-use chai::config::SolverConfig;
+use chai::config::求解器配置;
 use chai::interfaces::command_line::{
     从命令行参数创建, 命令, 命令行, 默认命令行参数
 };
@@ -29,7 +29,7 @@ fn main() -> Result<(), 错误> {
         命令::Optimize { threads, .. } => {
             let _config = 上下文.配置.clone();
             let 命令行 = 命令行::新建(参数, None);
-            let SolverConfig::SimulatedAnnealing(退火) =
+            let 求解器配置::SimulatedAnnealing(退火) =
                 _config.optimization.unwrap().metaheuristic.unwrap();
             let mut 线程池 = vec![];
             for 线程序号 in 0..threads {
@@ -46,10 +46,10 @@ fn main() -> Result<(), 错误> {
                         &mut 操作,
                         &上下文,
                         &子命令行,
+                        None,
                     );
                     let 编码器 = 冰雪清韵编码器::新建(&上下文, true).unwrap();
-                    let mut 目标函数 = 冰雪清韵目标函数::新建(&上下文, 编码器);
-                    目标函数.计算(&优化结果.映射, &None);
+                    let 目标函数 = 冰雪清韵目标函数::新建(&上下文, 编码器);
                     上下文.生成码表(&目标函数.编码器.编码结果, Some(子命令行.输出目录.clone()));
                     上下文
                         .分析码表(&目标函数.编码器.编码结果, Some(子命令行.输出目录.clone()))

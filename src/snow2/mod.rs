@@ -3,7 +3,12 @@ pub mod objective;
 pub mod operators;
 use crate::common::转换;
 use chai::{
-    config::{Mapped, 配置}, contexts::{上下文, 合并初始决策, 拓扑排序}, interfaces::默认输入, objectives::metric::键盘布局, optimizers::决策, 元素, 棱镜
+    config::{安排, 广义码位, 配置},
+    contexts::{上下文, 合并初始决策, 拓扑排序},
+    interfaces::默认输入,
+    objectives::metric::键盘布局,
+    optimizers::决策,
+    元素, 棱镜,
 };
 use chrono::Local;
 use indexmap::IndexMap;
@@ -46,9 +51,9 @@ pub enum 冰雪二拼字根安排 {
 }
 
 impl 冰雪二拼字根安排 {
-    fn from(mapped: &Mapped, 棱镜: &棱镜) -> Self {
+    fn from(mapped: &安排, 棱镜: &棱镜) -> Self {
         match mapped {
-            Mapped::Basic(s) => {
+            安排::Basic(s) => {
                 let 字符列表: Vec<char> = s.chars().collect();
                 if 字符列表.len() == 1 {
                     冰雪二拼字根安排::主根(棱镜.键转数字[&字符列表[0]] as 键)
@@ -61,7 +66,7 @@ impl 冰雪二拼字根安排 {
                     冰雪二拼字根安排::未选取
                 }
             }
-            Mapped::Grouped { element } => {
+            安排::Grouped { element } => {
                 冰雪二拼字根安排::归并(棱镜.元素转数字[element])
             }
             _ => 冰雪二拼字根安排::未选取,
@@ -149,30 +154,30 @@ impl 上下文 for 冰雪二拼上下文 {
         for (元素, 键) in &决策.声母 {
             let 元素名称 = self.棱镜.数字转元素[&元素].clone();
             let 字母 = self.棱镜.数字转键[&(*键 as u64)];
-            mapping.insert(元素名称, Mapped::Basic(字母.to_string()));
+            mapping.insert(元素名称, 安排::Basic(字母.to_string()));
         }
         for (元素, (不带调韵母, 声调)) in &self.韵母声调映射 {
             let 元素名称 = self.棱镜.数字转元素[&元素].clone();
             let 列号 = 决策.韵母[不带调韵母];
             let 行号 = 决策.声调[*声调];
             let 韵母字母 = 键盘布局[行号][列号];
-            mapping.insert(元素名称, Mapped::Basic(韵母字母.to_string()));
+            mapping.insert(元素名称, 安排::Basic(韵母字母.to_string()));
         }
         for (元素, 安排) in &决策.字根 {
             let 元素名称 = self.棱镜.数字转元素[&元素].clone();
             match 安排 {
                 冰雪二拼字根安排::主根(键) => {
                     let c = self.棱镜.数字转键[&(*键 as u64)];
-                    mapping.insert(元素名称, Mapped::Basic(c.to_string()));
+                    mapping.insert(元素名称, 安排::Basic(c.to_string()));
                 }
                 冰雪二拼字根安排::副根(键一, 键二) => {
                     let c1 = self.棱镜.数字转键[&(*键一 as u64)];
                     let c2 = self.棱镜.数字转键[&(*键二 as u64)];
-                    mapping.insert(元素名称, Mapped::Basic([c1, c2].iter().collect()));
+                    mapping.insert(元素名称, 安排::Basic([c1, c2].iter().collect()));
                 }
                 冰雪二拼字根安排::归并(s) => {
                     let element = self.棱镜.数字转元素[s].clone();
-                    mapping.insert(元素名称, Mapped::Grouped { element });
+                    mapping.insert(元素名称, 安排::Grouped { element });
                 }
                 _ => {}
             }
@@ -194,9 +199,9 @@ pub struct 冰雪二拼信息 {
 impl 冰雪二拼上下文 {
     pub fn 新建(输入: &默认输入) -> Self {
         let 布局 = 输入.配置.form.clone();
-        let 原始决策 = 布局.mapping;
+        let mut 原始决策 = 布局.mapping;
         let mut 原始决策空间 = 布局.mapping_space.unwrap_or_default();
-        合并初始决策(&mut 原始决策空间, &原始决策);
+        合并初始决策(&mut 原始决策空间, &mut 原始决策);
         let (所有元素, _) = 拓扑排序(&原始决策空间).unwrap();
         let mut 元素转数字 = FxHashMap::default();
         let mut 数字转元素 = FxHashMap::default();
@@ -235,11 +240,12 @@ impl 冰雪二拼上下文 {
             数字转元素,
             键转数字,
             数字转键,
+            可选元素位图索引: Default::default(),
         };
         for (元素名称, 安排) in &原始决策 {
             let 序号 = 棱镜.元素转数字[元素名称];
             if 元素名称.starts_with("冰声") {
-                let Mapped::Basic(编码) = 安排 else {
+                let 安排::Basic(编码) = 安排 else {
                     unreachable!()
                 };
                 let 字母 = 编码.chars().next().unwrap();
@@ -247,7 +253,7 @@ impl 冰雪二拼上下文 {
                 初始决策.声母.insert(序号, 键);
                 声母列表.push(序号);
             } else if 元素名称.starts_with("冰韵") {
-                let Mapped::Basic(编码) = 安排 else {
+                let 安排::Basic(编码) = 安排 else {
                     continue;
                 };
                 let 字母 = 编码.chars().next().unwrap();
@@ -272,12 +278,13 @@ impl 冰雪二拼上下文 {
         }
         let mut 信息列表 = vec![];
         for 原始信息 in &输入.词列表 {
-            let 字符列表: Vec<char> = 原始信息.name.chars().collect();
-            let 原始序列: Vec<_> = 原始信息
-                .sequence
-                .split(' ')
-                .map(|x| x.to_string())
-                .collect();
+            let 字符列表: Vec<char> = 原始信息.词.chars().collect();
+            let mut 原始序列 = vec![];
+            for 元素 in 原始信息.元素序列.clone().unwrap_or_default() {
+                if let 广义码位::Reference { element, .. } = 元素 {
+                    原始序列.push(element);
+                }
+            }
             let mut 序列 = [0; 4];
             for (i, 元素名称) in 原始序列
                 .iter()
@@ -299,7 +306,7 @@ impl 冰雪二拼上下文 {
                 序列,
                 独立一,
                 独立二,
-                频率: 原始信息.frequency,
+                频率: 原始信息.频率,
             });
         }
         信息列表.sort_by(|a, b| b.频率.cmp(&a.频率));

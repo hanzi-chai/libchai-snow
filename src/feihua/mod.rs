@@ -7,7 +7,7 @@ use crate::{
     qingyun::context::写入文本文件,
 };
 use chai::{
-    config::{Mapped, MappedKey, 配置},
+    config::{安排, 广义码位, 配置},
     contexts::{上下文, 合并初始决策, 展开变量, 拓扑排序, 条件, 条件安排},
     interfaces::默认输入,
     objectives::metric::指法标记,
@@ -64,21 +64,21 @@ pub enum 冰雪飞花安排 {
 }
 
 impl 冰雪飞花安排 {
-    pub fn from(mapped: &Mapped, 棱镜: &棱镜) -> Self {
+    pub fn from(mapped: &安排, 棱镜: &棱镜) -> Self {
         match mapped {
-            Mapped::Basic(s) => {
+            安排::Basic(s) => {
                 let 字母 = s.chars().next().unwrap();
                 let 键 = 棱镜.键转数字[&字母] as 键;
                 冰雪飞花安排::键位(键)
             }
-            Mapped::Advanced(keys) => {
-                let MappedKey::Ascii(字母) = keys[0] else {
+            安排::Advanced(keys) => {
+                let 广义码位::Ascii(字母) = keys[0] else {
                     panic!("Unexpected key type");
                 };
                 let 键 = 棱镜.键转数字[&字母] as 键;
                 冰雪飞花安排::键位(键)
             }
-            Mapped::Grouped { element } => 冰雪飞花安排::归并(棱镜.元素转数字[element]),
+            安排::Grouped { element } => 冰雪飞花安排::归并(棱镜.元素转数字[element]),
             _ => unreachable!(),
         }
     }
@@ -162,11 +162,11 @@ impl 上下文 for 冰雪飞花上下文 {
             match 元素安排 {
                 冰雪飞花安排::键位(键) => {
                     let 字母 = self.棱镜.数字转键[&(*键 as u64)];
-                    mapping.insert(元素名称, Mapped::Basic(字母.to_string()));
+                    mapping.insert(元素名称, 安排::Basic(字母.to_string()));
                 }
                 冰雪飞花安排::归并(元素) => {
                     let element = self.棱镜.数字转元素[&元素].clone();
-                    mapping.insert(元素名称, Mapped::Grouped { element });
+                    mapping.insert(元素名称, 安排::Grouped { element });
                 }
                 冰雪飞花安排::未选取 => {}
             }
@@ -202,10 +202,10 @@ type 原始动态拆分 = FxHashMap<String, Vec<Vec<String>>>;
 impl 冰雪飞花上下文 {
     pub fn 新建(输入: &默认输入) -> Self {
         let 布局 = 输入.配置.form.clone();
-        let 原始决策 = 布局.mapping;
+        let mut 原始决策 = 布局.mapping;
         let mut 原始决策空间 = 布局.mapping_space.unwrap_or_default();
         let 原始变量映射 = 布局.mapping_variables.unwrap_or_default();
-        合并初始决策(&mut 原始决策空间, &原始决策);
+        合并初始决策(&mut 原始决策空间, &mut 原始决策);
         展开变量(&mut 原始决策空间, &原始变量映射);
         let (所有元素, 元素图) = 拓扑排序(&原始决策空间).unwrap();
         let mut 元素转数字 = FxHashMap::default();
@@ -235,6 +235,7 @@ impl 冰雪飞花上下文 {
             数字转元素,
             键转数字,
             数字转键,
+            可选元素位图索引: Default::default()
         };
         let mut 初始决策 = 冰雪飞花决策 {
             元素: vec![冰雪飞花安排::键位(0); 棱镜.元素转数字.len() + 1],
@@ -356,11 +357,11 @@ impl 冰雪飞花上下文 {
         };
         for (序号, 可编码对象) in self.信息列表.iter().enumerate() {
             let 码表项 = 码表项 {
-                name: 可编码对象.汉字.to_string(),
-                full: 转编码(编码结果[序号].全码),
-                full_rank: 编码结果[序号].候选位置,
-                short: 转编码(编码结果[序号].简码),
-                short_rank: 0,
+                词: 可编码对象.汉字.to_string(),
+                全码: 转编码(编码结果[序号].全码),
+                全码排名: 编码结果[序号].候选位置,
+                简码: 转编码(编码结果[序号].简码),
+                简码排名: 0,
             };
             码表.push(码表项);
         }
@@ -414,7 +415,7 @@ impl 冰雪飞花上下文 {
         写入文本文件(码表路径, 码表);
         let mut 大竹码表 = vec![];
         for 码表项 in 码表 {
-            大竹码表.push((format!("({})", 码表项.full.clone()), 码表项.name.clone()));
+            大竹码表.push((format!("({})", 码表项.全码.clone()), 码表项.词.clone()));
         }
         for 拆分项 in 拆分表 {
             大竹码表.push((拆分项.1.clone(), 拆分项.0.clone()));
@@ -439,13 +440,13 @@ impl 冰雪飞花上下文 {
         for (序号, 码表项) in 码表.iter().enumerate() {
             let 百万分之频率 = (编码结果[序号].频率 as f64 / 一字总频率 as f64) * 1_000_000.0;
             翻转码表
-                .entry(码表项.full.clone())
+                .entry(码表项.全码.clone())
                 .or_insert_with(|| vec![])
-                .push((码表项.name.clone(), 百万分之频率 as u64));
+                .push((码表项.词.clone(), 百万分之频率 as u64));
         }
         let mut 差指法 = vec![];
         for 码表项 in 码表.iter().take(2000) {
-            let actual = 码表项.full.clone();
+            let actual = 码表项.全码.clone();
             for 键索引 in 0..(actual.len() - 1) {
                 let 组合 = (
                     actual.chars().nth(键索引).unwrap(),
@@ -453,24 +454,24 @@ impl 冰雪飞花上下文 {
                 );
                 if 指法标记.同指大跨排.contains(&组合) || 指法标记.错手.contains(&组合)
                 {
-                    差指法.push((码表项.name.clone(), actual.clone()));
+                    差指法.push((码表项.词.clone(), actual.clone()));
                 }
             }
         }
         let mut 重码 = vec![];
         for 码表项 in 码表.iter().take(4000) {
-            let 是重码 = 码表项.full_rank != 0;
+            let 是重码 = 码表项.全码排名 != 0;
             if 是重码 {
-                let mut 完整重码组 = 翻转码表[&码表项.full].clone();
+                let mut 完整重码组 = 翻转码表[&码表项.全码].clone();
                 let 位置 = 完整重码组
                     .iter()
-                    .position(|(x, _)| x == &码表项.name)
+                    .position(|(x, _)| x == &码表项.词)
                     .unwrap();
                 let 百万分之频率 = 完整重码组[位置].1;
                 完整重码组.resize(位置, ("".to_string(), 0));
                 重码.push((
-                    码表项.name.clone(),
-                    码表项.full.clone(),
+                    码表项.词.clone(),
+                    码表项.全码.clone(),
                     百万分之频率,
                     完整重码组,
                 ));
