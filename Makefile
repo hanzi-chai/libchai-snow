@@ -18,7 +18,10 @@ s:
 i:
 	cargo instruments --profile bench -t time -- $(PARAMS) -t 8 optimize
 
-FH_PARAMS = feihua/config.yaml -e elements.txt -k data/dist.txt -p data/linear_multiple.txt
+FH_PARAMS = feihua/config.yaml -e feihua/elements.yaml -k data/dist.txt -p data/linear_multiple.txt
+
+fed:
+	cargo run --bin feihua -- encode $(FH_PARAMS)
 
 fe:
 	cargo run --release --bin feihua -- encode $(FH_PARAMS)

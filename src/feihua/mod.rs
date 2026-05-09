@@ -2,28 +2,19 @@ pub mod encoder;
 pub mod objective;
 pub mod operators;
 use crate::{
-    common::{get_pua_mapper, 转换},
-    feihua::encoder::{冰雪飞花编码信息, 冰雪飞花编码器},
-    qingyun::context::写入文本文件,
+    common::转换, feihua::encoder::冰雪飞花编码信息, qingyun::context::写入文本文件
 };
 use chai::{
-    config::{安排, 广义码位, 配置},
-    contexts::{上下文, 合并初始决策, 展开变量, 拓扑排序, 条件, 条件安排},
-    interfaces::默认输入,
-    objectives::metric::指法标记,
-    optimizers::决策,
-    元素, 棱镜, 码表项, 错误,
+    config::{基本信息, 安排, 安排描述, 广义码位, 配置}, contexts::{
+        default::默认决策变化, 上下文, 合并初始决策, 展开变量, 拓扑排序, 条件, 条件安排,
+        补充存在性条件,
+    }, formatted_local_now, interfaces::默认输入, optimizers::决策, 位图, 元素, 原始元素序列及条件列表, 原始可编码对象, 棱镜, 码表项, 错误
 };
-use chrono::Local;
 use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
-use serde_yaml::{from_str, to_string};
-use std::{
-    fs::{File, read_to_string},
-    path::PathBuf,
-};
-use std::{io::Write, iter::zip};
+use serde_yaml::to_string;
+use std::{cmp::Reverse, io::Write};
+use std::{fs::File, path::PathBuf};
 
 pub const 大: usize = 20;
 pub const 小: usize = 8;
@@ -63,6 +54,8 @@ pub enum 冰雪飞花安排 {
     未选取,
 }
 
+type 冰雪飞花条件安排 = 条件安排<冰雪飞花安排>;
+
 impl 冰雪飞花安排 {
     pub fn from(mapped: &安排, 棱镜: &棱镜) -> Self {
         match mapped {
@@ -79,7 +72,7 @@ impl 冰雪飞花安排 {
                 冰雪飞花安排::键位(键)
             }
             安排::Grouped { element } => 冰雪飞花安排::归并(棱镜.元素转数字[element]),
-            _ => unreachable!(),
+            安排::Unused(()) => 冰雪飞花安排::未选取,
         }
     }
 }
@@ -90,10 +83,24 @@ pub struct 冰雪飞花决策 {
 }
 
 impl 决策 for 冰雪飞花决策 {
-    type 变化 = ();
+    type 变化 = 默认决策变化;
 
-    fn 除法(_旧变化: &Self::变化, _新变化: &Self::变化) -> Self::变化 {
-        ()
+    fn 除法(旧变化: &Self::变化, 新变化: &Self::变化) -> Self::变化 {
+        let mut res = 默认决策变化 {
+            增加元素: 旧变化.减少元素.clone(),
+            减少元素: 旧变化.增加元素.clone(),
+            移动元素: 旧变化.移动元素.clone(),
+        };
+        for 元素 in &新变化.增加元素 {
+            res.增加元素.push(*元素);
+        }
+        for 元素 in &新变化.减少元素 {
+            res.减少元素.push(*元素);
+        }
+        for 元素 in &新变化.移动元素 {
+            res.移动元素.push(*元素);
+        }
+        res
     }
 }
 
@@ -117,24 +124,30 @@ impl 冰雪飞花决策 {
         }
         编码列表
     }
+
+    pub fn 允许(&self, 条件安排: &冰雪飞花条件安排) -> bool {
+        for 条件 in &条件安排.条件 {
+            if 条件.谓词 != (self.元素[条件.元素] == 条件.值) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct 冰雪飞花决策空间 {
-    pub 元素空间: Vec<Vec<条件安排<冰雪飞花安排>>>,
+    pub 元素: Vec<Vec<条件安排<冰雪飞花安排>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct 冰雪飞花汉字信息 {
-    pub 汉字: char,
+pub struct 冰雪飞花可编码对象 {
+    pub 词: String,
+    pub 元素序列: [元素; 4],
+    pub 全部元素序列: Vec<([元素; 4], 位图, 位图)>,
     pub 频率: u64,
-    pub 声母: 元素,
-    // 0 表示没有部首
-    pub 部首: 元素,
-    pub 字块: [usize; 2],
+    pub 原始顺序: usize,
 }
-
-pub type 动态拆分项 = Vec<[usize; 3]>;
 
 #[derive(Clone, Debug)]
 pub struct 冰雪飞花上下文 {
@@ -142,8 +155,9 @@ pub struct 冰雪飞花上下文 {
     pub 初始决策: 冰雪飞花决策,
     pub 决策空间: 冰雪飞花决策空间,
     pub 棱镜: 棱镜,
-    pub 信息列表: Vec<冰雪飞花汉字信息>,
-    pub 动态拆分: Vec<动态拆分项>,
+    pub 词列表: Vec<冰雪飞花可编码对象>,
+    pub 元素图: FxHashMap<元素, Vec<元素>>,
+    pub 保存原始决策空间: IndexMap<String, Vec<安排描述>>,
 }
 
 impl 上下文 for 冰雪飞花上下文 {
@@ -151,15 +165,21 @@ impl 上下文 for 冰雪飞花上下文 {
 
     fn 序列化(&self, 决策: &Self::决策) -> String {
         let mut 新配置 = self.配置.clone();
-        新配置.info.as_mut().unwrap().version =
-            Some(format!("{}", Local::now().format("%Y-%m-%d+%H:%M:%S")));
+        let mut info = 新配置.info.clone().unwrap_or(基本信息 {
+            name: None,
+            description: None,
+            version: None,
+            author: None,
+        });
+        info.version = Some(formatted_local_now());
+        新配置.info = Some(info);
         let mut mapping = IndexMap::new();
-        for (序号, 元素安排) in 决策.元素.iter().enumerate() {
+        for (序号, 安排) in 决策.元素.iter().enumerate() {
             if 序号 <= 空格 as usize {
                 continue;
             }
             let 元素名称 = self.棱镜.数字转元素[&序号].clone();
-            match 元素安排 {
+            match 安排 {
                 冰雪飞花安排::键位(键) => {
                     let 字母 = self.棱镜.数字转键[&(*键 as u64)];
                     mapping.insert(元素名称, 安排::Basic(字母.to_string()));
@@ -172,32 +192,10 @@ impl 上下文 for 冰雪飞花上下文 {
             }
         }
         新配置.form.mapping = mapping;
+        新配置.form.mapping_space = Some(self.保存原始决策空间.clone());
         to_string(&新配置).unwrap()
     }
 }
-
-#[derive(Deserialize)]
-struct 拆分输入 {
-    汉字信息: 原始汉字信息,
-    动态拆分: 原始动态拆分,
-}
-
-#[derive(Deserialize)]
-struct 原始读音 {
-    频率: u64,
-    声: String,
-}
-
-#[derive(Deserialize)]
-struct 原始汉字信息项 {
-    pub 汉字: char,
-    pub 读音: Vec<原始读音>,
-    pub 部首: Option<String>,
-    pub 字块: Vec<String>,
-}
-
-type 原始汉字信息 = Vec<原始汉字信息项>;
-type 原始动态拆分 = FxHashMap<String, Vec<Vec<String>>>;
 
 impl 冰雪飞花上下文 {
     pub fn 新建(输入: &默认输入) -> Self {
@@ -206,8 +204,13 @@ impl 冰雪飞花上下文 {
         let mut 原始决策空间 = 布局.mapping_space.unwrap_or_default();
         let 原始变量映射 = 布局.mapping_variables.unwrap_or_default();
         合并初始决策(&mut 原始决策空间, &mut 原始决策);
+        // 在合并之后克隆一份原始决策空间，以便后续使用
+        let 保存原始决策空间 = 原始决策空间.clone();
         展开变量(&mut 原始决策空间, &原始变量映射);
-        let (所有元素, 元素图) = 拓扑排序(&原始决策空间).unwrap();
+        // 补充存在性条件
+        补充存在性条件(&mut 原始决策空间);
+        let (排序后元素名称列表, 原始元素图) = 拓扑排序(&原始决策空间).unwrap();
+        let mut 元素图: FxHashMap<元素, Vec<_>> = FxHashMap::default();
         let mut 元素转数字 = FxHashMap::default();
         let mut 数字转元素 = FxHashMap::default();
         let mut 键转数字 = FxHashMap::default();
@@ -224,34 +227,36 @@ impl 冰雪飞花上下文 {
             键转数字.insert(键, 序号 as u64);
             数字转键.insert(序号 as u64, 键);
         }
-        for 元素名称 in &所有元素 {
+        for 元素名称 in &排序后元素名称列表 {
             序号 += 1;
             元素转数字.insert(元素名称.clone(), 序号);
             数字转元素.insert(序号, 元素名称.clone());
         }
+        let mut 可选元素位图索引 = FxHashMap::default();
+        for v in 元素转数字.values() {
+            可选元素位图索引.insert(*v, *v);
+        }
         let 棱镜 = 棱镜 {
-            进制: 32 as u64,
+            进制: 32,
             元素转数字,
             数字转元素,
             键转数字,
             数字转键,
-            可选元素位图索引: Default::default()
+            可选元素位图索引,
         };
         let mut 初始决策 = 冰雪飞花决策 {
             元素: vec![冰雪飞花安排::键位(0); 棱镜.元素转数字.len() + 1],
         };
-        for (元素名称, 安排) in &原始决策 {
-            let 序号 = 棱镜.元素转数字[元素名称];
-            let 安排 = 冰雪飞花安排::from(安排, &棱镜);
-            初始决策.元素[序号] = 安排;
-        }
         let mut 决策空间 = 冰雪飞花决策空间 {
-            元素空间: vec![vec![]; 棱镜.元素转数字.len() + 1],
+            元素: vec![vec![]; 棱镜.元素转数字.len() + 1],
         };
-        for (元素名称, 安排列表) in &原始决策空间 {
+        for 元素名称 in &排序后元素名称列表 {
+            let 原始安排 = &原始决策[元素名称];
+            let 原始安排列表 = 原始决策空间[元素名称].clone();
             let 序号 = 棱镜.元素转数字[元素名称];
+            let 安排 = 冰雪飞花安排::from(原始安排, &棱镜);
             let mut 条件安排列表 = vec![];
-            for 条件安排 in 安排列表 {
+            for 条件安排 in 原始安排列表 {
                 let 安排 = 冰雪飞花安排::from(&条件安排.value, &棱镜);
                 let mut 条件列表 = vec![];
                 for 条件 in 条件安排.condition.as_ref().unwrap_or(&vec![]) {
@@ -267,83 +272,76 @@ impl 冰雪飞花上下文 {
                     分数: 条件安排.score,
                 });
             }
-            决策空间.元素空间[序号] = 条件安排列表;
+            初始决策.元素[序号] = 安排;
+            决策空间.元素[序号] = 条件安排列表;
+            let 下游 = 原始元素图.get(元素名称).unwrap();
+            let 下游编号: Vec<_> = 下游.iter().map(|x| 棱镜.元素转数字[x]).collect();
+            元素图.insert(序号, 下游编号);
         }
-        let 拆分输入: 拆分输入 =
-            from_str(&read_to_string("feihua/dynamic_analysis.yaml").unwrap()).unwrap();
-        let mut 动态拆分 = vec![];
-        let mut 块转数字 = FxHashMap::default();
-        let mut 数字转块 = FxHashMap::default();
-        for (块, 原始拆分方式列表) in 拆分输入.动态拆分 {
-            let 块序号 = 动态拆分.len();
-            块转数字.insert(块.clone(), 块序号);
-            数字转块.insert(块序号, 块.clone());
-            let mut 拆分方式列表 = vec![];
-            for 原始拆分方式 in &原始拆分方式列表 {
-                let mut 拆分方式 = [0; 3];
-                for (索引, 字根) in 原始拆分方式.iter().enumerate().take(3) {
-                    let 字根序号 = 棱镜.元素转数字[字根];
-                    拆分方式[索引] = 字根序号;
-                }
-                拆分方式列表.push(拆分方式);
-            }
-            动态拆分.push(拆分方式列表);
-        }
-        let mut 信息列表 = vec![];
-        for 原始信息 in 拆分输入.汉字信息 {
-            let mut 字块 = [usize::MAX; 2];
-            for (索引, 块) in 原始信息.字块.iter().enumerate().take(2) {
-                let 块序号 = 块转数字[块];
-                字块[索引] = 块序号;
-            }
-            let 部首 = if let Some(部首名称) = &原始信息.部首 {
-                棱镜.元素转数字[部首名称]
-            } else {
-                0
-            };
-            let mut freq = FxHashMap::default();
-            for 读音 in &原始信息.读音 {
-                let 声母 = 棱镜.元素转数字[&读音.声];
-                freq.entry(声母)
-                    .and_modify(|f| *f += 读音.频率)
-                    .or_insert(读音.频率);
-            }
-            for (声母, 频率) in freq {
-                信息列表.push(冰雪飞花汉字信息 {
-                    汉字: 原始信息.汉字,
-                    频率,
-                    声母,
-                    部首,
-                    字块,
-                });
-            }
-        }
-        信息列表.sort_by_key(|x| std::cmp::Reverse(x.频率));
-        // 如果一个元素没有被用作部首，而且也没有被别的元素依赖，则可以设为未选取
-        for 元素名称 in 所有元素 {
-            if 元素名称.starts_with("声-") {
-                continue;
-            }
-            let 元素 = 棱镜.元素转数字[&元素名称];
-            let 被依赖 = 元素图[&元素名称].len() > 0;
-            let 是部首 = 信息列表.iter().any(|x| x.部首 == 元素);
-            if !被依赖 && !是部首 {
-                println!("元素 {:?} 未被依赖且不是部首，可以设为未选取", 元素名称);
-                决策空间.元素空间[元素].push(条件安排 {
-                    条件: vec![],
-                    安排: 冰雪飞花安排::未选取,
-                    分数: 0.0,
-                });
-            }
-        }
+        let 词列表 = Self::预处理词列表(&输入.词列表, &棱镜);
         Self {
             配置: 输入.配置.clone(),
             初始决策,
             决策空间,
             棱镜,
-            信息列表,
-            动态拆分,
+            词列表,
+            元素图,
+            保存原始决策空间,
         }
+    }
+
+    pub fn 预处理词列表(
+        词列表: &Vec<原始可编码对象>,
+        棱镜: &棱镜,
+    ) -> Vec<冰雪飞花可编码对象> {
+        let mut 词信息列表 = vec![];
+        for (原始顺序, 原始可编码对象) in 词列表.into_iter().enumerate() {
+            let 原始可编码对象 {
+                词,
+                频率,
+                全部元素序列: 原始全部元素序列,
+                ..
+            } = 原始可编码对象.clone();
+            let mut 全部元素序列 = vec![];
+            assert!(
+                原始全部元素序列
+                    .clone()
+                    .unwrap()
+                    .last()
+                    .unwrap()
+                    .条件列表
+                    .is_empty(),
+                "编码对象「{词}」的最后一个元素序列必须没有任何条件",
+                词 = 词
+            );
+            for 原始元素序列及条件列表 {
+                元素序列, 条件列表
+            } in 原始全部元素序列.unwrap()
+            {
+                let 元素序列 = 棱镜.预处理元素序列(&词, &元素序列, 4).unwrap();
+                let mut 新元素序列 = [0; 4];
+                新元素序列.copy_from_slice(&元素序列[0..4]);
+                let 负条件列表: Vec<_> = 条件列表
+                    .iter()
+                    .filter(|c| c.op == "不是")
+                    .cloned()
+                    .collect();
+                let 正条件列表: Vec<_> =
+                    条件列表.iter().filter(|c| c.op == "是").cloned().collect();
+                let 全集合位图 = 位图::从条件列表创建(&负条件列表, 棱镜);
+                let 小集合位图 = 位图::从条件列表创建(&正条件列表, 棱镜);
+                全部元素序列.push((新元素序列, 全集合位图, 小集合位图));
+            }
+            词信息列表.push(冰雪飞花可编码对象 {
+                词: 词.clone(),
+                元素序列: 全部元素序列[0].0,
+                全部元素序列,
+                频率,
+                原始顺序,
+            });
+        }
+        词信息列表.sort_by_key(|x| Reverse(x.频率));
+        词信息列表
     }
 
     pub fn 生成码表(&self, 编码结果: &Vec<冰雪飞花编码信息>) -> Vec<码表项> {
@@ -355,9 +353,9 @@ impl 冰雪飞花上下文 {
                 .map(|x| self.棱镜.数字转键[&(*x as u64)])
                 .collect()
         };
-        for (序号, 可编码对象) in self.信息列表.iter().enumerate() {
+        for (序号, 可编码对象) in self.词列表.iter().enumerate() {
             let 码表项 = 码表项 {
-                词: 可编码对象.汉字.to_string(),
+                词: 可编码对象.词.to_string(),
                 全码: 转编码(编码结果[序号].全码),
                 全码排名: 编码结果[序号].候选位置,
                 简码: 转编码(编码结果[序号].简码),
@@ -368,57 +366,14 @@ impl 冰雪飞花上下文 {
         码表
     }
 
-    pub fn 生成拆分表(&self, 编码器: &冰雪飞花编码器) -> Vec<(String, String)> {
-        let mut 拆分表 = vec![];
-        let 映射 = get_pua_mapper();
-        for (拆分序列, 信息) in zip(编码器.拆分序列.iter(), 编码器.汉字信息.iter())
-        {
-            let mut 序列 = vec![];
-            if 信息.部首 == 0 {
-                for 字根 in &拆分序列[1..] {
-                    if *字根 != 0 {
-                        序列.push(self.棱镜.数字转元素[字根].clone());
-                    }
-                }
-            } else {
-                序列.push(self.棱镜.数字转元素[&拆分序列[1]].clone());
-                序列.push("・".to_string());
-                if 信息.字块[1] == usize::MAX {
-                    for 字根 in &拆分序列[2..] {
-                        if *字根 != 0 {
-                            序列.push(self.棱镜.数字转元素[字根].clone());
-                        }
-                    }
-                } else {
-                    序列.push(self.棱镜.数字转元素[&拆分序列[2]].clone());
-                    序列.push("・".to_string());
-                    序列.push(self.棱镜.数字转元素[&拆分序列[3]].clone());
-                }
-            }
-            let 序列: String = 序列
-                .into_iter()
-                .map(|x| x.chars().next().unwrap())
-                .map(|x| 映射.get(&x).cloned().unwrap_or(x))
-                .collect();
-            拆分表.push((信息.汉字.to_string(), 序列));
-        }
-        拆分表
-    }
-
     pub fn 输出码表(
-        &self,
-        输出目录: &PathBuf,
-        码表: &Vec<码表项>,
-        拆分表: &Vec<(String, String)>,
+        &self, 输出目录: &PathBuf, 码表: &Vec<码表项>
     ) -> Result<(), 错误> {
         let 码表路径 = 输出目录.join("code.txt");
         写入文本文件(码表路径, 码表);
         let mut 大竹码表 = vec![];
         for 码表项 in 码表 {
             大竹码表.push((format!("({})", 码表项.全码.clone()), 码表项.词.clone()));
-        }
-        for 拆分项 in 拆分表 {
-            大竹码表.push((拆分项.1.clone(), 拆分项.0.clone()));
         }
         let 大竹码表路径 = 输出目录.join("dazhu.txt");
         写入文本文件(大竹码表路径, &大竹码表);
@@ -432,7 +387,6 @@ impl 冰雪飞花上下文 {
         码表: &[码表项],
         路径: &PathBuf,
     ) -> Result<(), 错误> {
-        let 指法标记 = 指法标记::new();
         let mut 文件 = File::create(路径).unwrap();
         // 全码 -> 词列表的映射
         let mut 翻转码表 = FxHashMap::default();
@@ -444,31 +398,16 @@ impl 冰雪飞花上下文 {
                 .or_insert_with(|| vec![])
                 .push((码表项.词.clone(), 百万分之频率 as u64));
         }
-        let mut 差指法 = vec![];
-        for 码表项 in 码表.iter().take(2000) {
-            let actual = 码表项.全码.clone();
-            for 键索引 in 0..(actual.len() - 1) {
-                let 组合 = (
-                    actual.chars().nth(键索引).unwrap(),
-                    actual.chars().nth(键索引 + 1).unwrap(),
-                );
-                if 指法标记.同指大跨排.contains(&组合) || 指法标记.错手.contains(&组合)
-                {
-                    差指法.push((码表项.词.clone(), actual.clone()));
-                }
-            }
-        }
         let mut 重码 = vec![];
         for 码表项 in 码表.iter().take(4000) {
             let 是重码 = 码表项.全码排名 != 0;
             if 是重码 {
-                let mut 完整重码组 = 翻转码表[&码表项.全码].clone();
+                let 完整重码组 = 翻转码表[&码表项.全码].clone();
                 let 位置 = 完整重码组
                     .iter()
                     .position(|(x, _)| x == &码表项.词)
                     .unwrap();
                 let 百万分之频率 = 完整重码组[位置].1;
-                完整重码组.resize(位置, ("".to_string(), 0));
                 重码.push((
                     码表项.词.clone(),
                     码表项.全码.clone(),
@@ -480,10 +419,6 @@ impl 冰雪飞花上下文 {
         writeln!(文件, "# 前 4000 中重码\n")?;
         for (name, code, frequency, names) in 重码 {
             writeln!(文件, "- {name} {code} {frequency}μ：{names:?}")?;
-        }
-        writeln!(文件, "\n# 前 2000 中差指法项\n")?;
-        for (name, code) in 差指法 {
-            writeln!(文件, "- {name} {code}")?;
         }
         Ok(())
     }
