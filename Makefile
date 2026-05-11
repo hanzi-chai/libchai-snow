@@ -4,7 +4,7 @@ fetch:
 		curl "https://assets.chaifen.app/$$file" -o assets/$$file; \
 	done
 
-PARAMS = data/config.yaml -e data/elements.txt -k data/dist.txt -p data/linear_multiple.txt
+PARAMS = assets/config.yaml -e assets/elements.txt -k assets/dist.txt -p assets/linear_multiple.txt
 
 e:
 	cargo run --release -- $(PARAMS) encode
@@ -18,7 +18,7 @@ s:
 i:
 	cargo instruments --profile bench -t time -- $(PARAMS) -t 8 optimize
 
-FH_PARAMS = feihua/config.yaml -e feihua/elements.yaml -k data/dist.txt -p data/linear_multiple.txt
+FH_PARAMS = project-feihua/config.yaml -e project-feihua/elements.yaml -k assets/dist.txt -p assets/linear_multiple.txt
 
 fed:
 	cargo run --bin feihua -- encode $(FH_PARAMS)
