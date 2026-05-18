@@ -9,6 +9,7 @@
         "strictFunctionTypes": true,
         "sourceMap": true,
         "forceConsistentCasingInFileNames": true,
+        "types": ["node"],
     },
     "exclude": [
         "node_modules",
