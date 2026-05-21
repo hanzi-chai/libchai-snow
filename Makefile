@@ -4,21 +4,9 @@ fetch:
 		curl "https://assets.chaifen.app/$$file" -o assets/$$file; \
 	done
 
-PARAMS = assets/config.yaml -e assets/elements.txt -k assets/dist.txt -p assets/linear_multiple.txt
+COMMON = -k assets/key_distribution.txt -p assets/pair_equivalence.txt
 
-e:
-	cargo run --release -- $(PARAMS) encode
-
-p:
-	cargo run --release -- $(PARAMS) -t 10 optimize
-
-s:
-	cargo run --release -- $(PARAMS) optimize
-
-i:
-	cargo instruments --profile bench -t time -- $(PARAMS) -t 8 optimize
-
-FH_PARAMS = project-feihua/config.yaml -e project-feihua/elements.yaml -k assets/dist.txt -p assets/linear_multiple.txt
+FH_PARAMS = project-feihua/config.yaml -e project-feihua/elements.yaml $(COMMON)
 
 fed:
 	cargo run --bin feihua -- encode $(FH_PARAMS)
@@ -31,3 +19,31 @@ fo:
 
 fp:
 	cargo run --release --bin feihua -- optimize $(FH_PARAMS) -t 10
+
+S2_PARAMS = project-snow2/config.yaml -e project-snow2/elements.txt $(COMMON)
+
+s2d:
+	cargo run --bin snow2 -- encode $(S2_PARAMS)
+
+s2e:
+	cargo run --release --bin snow2 -- encode $(S2_PARAMS)
+
+s2o:
+	cargo run --release --bin snow2 -- optimize $(S2_PARAMS)
+
+s2p:
+	cargo run --release --bin snow2 -- optimize $(S2_PARAMS) -t 10
+
+QY_PARAMS = project-qingyun/config.yaml -e project-qingyun/elements.txt $(COMMON)
+
+qyd:
+	cargo run --bin qingyun -- encode $(QY_PARAMS)
+
+qye:
+	cargo run --release --bin qingyun -- encode $(QY_PARAMS)
+
+qyo:
+	cargo run --release --bin qingyun -- optimize $(QY_PARAMS)
+
+qyp:
+	cargo run --release --bin qingyun -- optimize $(QY_PARAMS) -t 10

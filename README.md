@@ -2,20 +2,32 @@
 
 ## 准备文件
 
-- `assets/key_distribution.txt`, `assets/pair_equivalence.txt`：用指分布和当量文件，含义和 chai 中相同
-- `snow2.yaml`, `snow2.txt`：配置文件和元素序列文件，含义和 chai 中相同
-- `tree.yaml`, `dual.yaml`：储存了字根树信息和双编码信息
-
-# 运行
+首先拉取手指分布和当量文件：
 
 ```bash
-cargo run --release -- snow2.yaml -e snow2.txt optimize
+make fetch
 ```
 
-本程序还支持多线程运行，使用 `-t` 指定线程数量，例如
+各方案的配置文件和元素序列文件放在对应的项目目录下：
+
+- `project-feihua/`：冰雪飞花
+- `project-snow2/`：冰雪二拼
+- `project-qingyun/`：冰雪清韵
+
+## 运行
+
+各方案的 Makefile 目标前缀：
+
+| 方案 | 调试编码 | 发布编码 | 单线程优化 | 多线程优化（10 线程）|
+|------|----------|----------|------------|------------|
+| 冰雪飞花 | `fed` | `fe` | `fo` | `fp` |
+| 冰雪二拼 | `s2d` | `s2e` | `s2o` | `s2p` |
+| 冰雪清韵 | `qyd` | `qye` | `qyo` | `qyp` |
+
+例如，对冰雪飞花方案进行多线程优化：
 
 ```bash
-cargo run --release -- snow2.yaml -e snow2.txt -t 10 optimize
+make fp
 ```
 
-多线程时计算进度的输出会重定向到 `output-xxx/<线程编号>/log.txt`。
+多线程运行时，各线程进度日志写入 `output-<时间戳>/<线程序号>/log.txt`，汇总写入 `output-<时间戳>/总结.txt`。
