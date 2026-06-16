@@ -4,7 +4,7 @@ pub mod operators;
 use crate::common::转换;
 use chai::{
     config::{安排, 广义码位, 配置},
-    contexts::{上下文, 合并初始决策, 拓扑排序},
+    contexts::{上下文, 拓扑排序},
     interfaces::默认输入,
     objectives::metric::键盘布局,
     optimizers::决策,
@@ -199,9 +199,8 @@ pub struct 冰雪二拼信息 {
 impl 冰雪二拼上下文 {
     pub fn 新建(输入: &默认输入) -> Self {
         let 布局 = 输入.配置.form.clone();
-        let mut 原始决策 = 布局.mapping;
-        let mut 原始决策空间 = 布局.mapping_space.unwrap_or_default();
-        合并初始决策(&mut 原始决策空间, &mut 原始决策);
+        let 原始决策 = 布局.mapping;
+        let 原始决策空间 = 输入.配置.generated_mapping_space.clone().unwrap_or_default();
         let (所有元素, _) = 拓扑排序(&原始决策空间).unwrap();
         let mut 元素转数字 = FxHashMap::default();
         let mut 数字转元素 = FxHashMap::default();

@@ -5,9 +5,8 @@ use crate::{
     common::转换, feihua::encoder::冰雪飞花编码信息, qingyun::context::写入文本文件
 };
 use chai::{
-    config::{基本信息, 安排, 安排描述, 广义码位, 配置}, contexts::{
-        default::默认决策变化, 上下文, 合并初始决策, 展开变量, 拓扑排序, 条件, 条件安排,
-        补充存在性条件,
+    config::{基本信息, 安排, 广义码位, 配置}, contexts::{
+        default::默认决策变化, 上下文, 拓扑排序, 条件, 条件安排,
     }, formatted_local_now, interfaces::默认输入, optimizers::决策, 位图, 元素, 原始元素序列及条件列表, 原始可编码对象, 棱镜, 码表项, 错误
 };
 use indexmap::IndexMap;
@@ -157,7 +156,6 @@ pub struct 冰雪飞花上下文 {
     pub 棱镜: 棱镜,
     pub 词列表: Vec<冰雪飞花可编码对象>,
     pub 元素图: FxHashMap<元素, Vec<元素>>,
-    pub 保存原始决策空间: IndexMap<String, Vec<安排描述>>,
 }
 
 impl 上下文 for 冰雪飞花上下文 {
@@ -192,7 +190,7 @@ impl 上下文 for 冰雪飞花上下文 {
             }
         }
         新配置.form.mapping = mapping;
-        新配置.form.mapping_space = Some(self.保存原始决策空间.clone());
+        新配置.form.mapping_space = None;
         to_string(&新配置).unwrap()
     }
 }
@@ -201,14 +199,12 @@ impl 冰雪飞花上下文 {
     pub fn 新建(输入: &默认输入) -> Self {
         let 布局 = 输入.配置.form.clone();
         let mut 原始决策 = 布局.mapping;
-        let mut 原始决策空间 = 布局.mapping_space.unwrap_or_default();
-        let 原始变量映射 = 布局.mapping_variables.unwrap_or_default();
-        合并初始决策(&mut 原始决策空间, &mut 原始决策);
-        // 在合并之后克隆一份原始决策空间，以便后续使用
-        let 保存原始决策空间 = 原始决策空间.clone();
-        展开变量(&mut 原始决策空间, &原始变量映射);
-        // 补充存在性条件
-        补充存在性条件(&mut 原始决策空间);
+        let 原始决策空间 = 输入.配置.generated_mapping_space.clone().unwrap_or_default();
+        for 元素名称 in 原始决策空间.keys() {
+            if !原始决策.contains_key(元素名称) {
+                原始决策.insert(元素名称.clone(), 安排::Unused(()));
+            }
+        }
         let (排序后元素名称列表, 原始元素图) = 拓扑排序(&原始决策空间).unwrap();
         let mut 元素图: FxHashMap<元素, Vec<_>> = FxHashMap::default();
         let mut 元素转数字 = FxHashMap::default();
@@ -286,7 +282,6 @@ impl 冰雪飞花上下文 {
             棱镜,
             词列表,
             元素图,
-            保存原始决策空间,
         }
     }
 
