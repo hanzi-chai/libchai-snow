@@ -5,3 +5,16 @@ output/
 output-*
 *.txt
 *.yaml
+!src/feihua/config.yaml
+.DS_Store
+*.json
+*.html
+*.log
+*.svg
+*.png
+
+# 飞花人工维护标注；其他JSON仍为生成文件。
+!/src/feihua/units.json
+
+# 飞花报告源码模板；生成报告统一写入 output/feihua/。
+!/src/feihua/report.html

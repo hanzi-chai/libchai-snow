@@ -1,18 +1,19 @@
 {
-    "compilerOptions": {
-        "module": "ESNext",
-        "moduleResolution": "Bundler",
-        "target": "ES2022",
-        "jsx": "react-jsx",
-        "strict": true,
-        "strictNullChecks": true,
-        "strictFunctionTypes": true,
-        "sourceMap": true,
-        "forceConsistentCasingInFileNames": true,
-        "types": ["node"],
-    },
-    "exclude": [
-        "node_modules",
-        "**/node_modules/*"
-    ]
+	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"customConditions": ["node"],
+		"target": "ES2022",
+		"lib": ["ES2022", "ES2023.Array"],
+		"jsx": "react-jsx",
+		"strict": true,
+		"strictNullChecks": true,
+		"strictFunctionTypes": true,
+		"sourceMap": true,
+		"forceConsistentCasingInFileNames": true,
+		"types": ["node"]
+	},
+	"exclude": ["node_modules", "output", "output-*", "**/node_modules/*"]
 }
