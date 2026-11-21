@@ -15,6 +15,10 @@ output-*
 
 # 飞花人工维护标注；其他JSON仍为生成文件。
 !/src/feihua/units.json
+!/biome.json
+!/package.json
+!/package-lock.json
+!/tsconfig.json
 
 # 飞花报告源码模板；生成报告统一写入 output/feihua/。
 !/src/feihua/report.html

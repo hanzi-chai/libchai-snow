@@ -1,0 +1,30 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+	"files": {
+		"includes": [
+			"src/**/*.ts",
+			"src/**/*.json",
+			"src/**/*.html",
+			"scripts/**/*.ts",
+			"*.json"
+		]
+	},
+	"linter": {
+		"rules": {
+			"style": { "noNonNullAssertion": "error" },
+			"suspicious": { "noExplicitAny": "error" }
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["package-lock.json"],
+			"formatter": { "indentStyle": "space", "indentWidth": 2 }
+		},
+		{
+			"includes": ["src/feihua/units.json"],
+			"formatter": { "indentStyle": "space", "indentWidth": 2 },
+			"json": { "formatter": { "expand": "always" } }
+		}
+	]
+}

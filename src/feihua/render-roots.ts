@@ -1,22 +1,19 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, extname, relative, resolve, sep } from "node:path";
 import {
 	包围内部范围表,
 	字符,
-	生成,
 	生成笔画路径,
-	type 生成配置,
 	获取字库,
-	type 配置,
+	读取配置,
 } from "hanzi-chai";
-import { load } from "js-yaml";
 
 const 输出目录 = resolve("output/feihua-charts");
 
-const 帮助 = `渲染冰雪飞花字根图（SVG + A4 横版 PDF）
+const 帮助 = `渲染冰雪飞花字根图（SVG、PNG、A4 横版 PDF）
 用法：bun src/feihua/render-roots.ts --config <优化结果/config.yaml> [--out <输出前缀>]
-  --out       默认 output/feihua-charts/root-chart；也可传 .svg 或 .pdf 路径
+  --out       默认 output/feihua-charts/root-chart；也可传 .svg、.png 或 .pdf 路径
   --inkscape  Inkscape 可执行文件，默认 inkscape（PDF 文字转曲，便于打印）`;
 const 参数 = new Map<string, string>();
 for (let 位 = 2; 位 < process.argv.length; 位++) {
@@ -39,37 +36,24 @@ const 配置参数 = 参数.get("--config");
 if (!配置参数) throw Error(帮助);
 const 配置路径 = resolve(配置参数);
 let 前缀 = resolve(参数.get("--out") ?? `${输出目录}/root-chart`);
-if ([".svg", ".pdf"].includes(extname(前缀))) 前缀 = 前缀.slice(0, -4);
+if ([".svg", ".png", ".pdf"].includes(extname(前缀))) 前缀 = 前缀.slice(0, -4);
 const 输出相对路径 = relative(输出目录, 前缀);
 if (
 	!输出相对路径 ||
 	输出相对路径 === ".." ||
-	输出相对路径.startsWith(`..${sep}`) ||
-	resolve(输出目录, 输出相对路径) !== 前缀
+	输出相对路径.startsWith(`..${sep}`)
 )
 	throw Error("--out 必须位于 output/feihua-charts/ 内，并包含文件名前缀");
-if ([`${前缀}.svg`, `${前缀}.pdf`].includes(配置路径))
+if (["svg", "png", "pdf"].some((格式) => `${前缀}.${格式}` === 配置路径))
 	throw Error("输出不能覆盖输入配置");
 
-const 方案 = load(readFileSync(配置路径, "utf8")) as 配置;
-if (!方案?.form?.mapping) throw Error("输入缺少 form.mapping");
+const 方案 = 读取配置(配置路径);
 const 映射 = 方案.form.mapping;
 const 字库 = 获取字库(方案);
 const 键序 = ["AOEIUV;/", "BPMFDTNL", "GKHWJQXY", "ZCSR,."];
 const 全键 = 键序.join("").toLowerCase();
 const 笔画 = ["⼀", "⼁", "⼃", "⼂", "乙"];
-const 笔画键 = "eiuoa";
 const 是根名 = (名称: string) => /^字形-[0-9a-f]{5}$|^[1-5]$/.test(名称);
-if ((方案 as Partial<生成配置>).generated_mapping_space == null)
-	生成({
-		...方案,
-		form: {
-			...方案.form,
-			mapping: Object.fromEntries(
-				Object.entries(映射).filter(([, 值]) => 值 != null),
-			),
-		},
-	});
 const 配色 = {
 	B: { 字: "#7950a4", 底: "#faf7fd", 边: "#d7c7e7" },
 	A: { 字: "#3065a0", 底: "#f7faff", 边: "#c5d6ea" },
@@ -115,11 +99,13 @@ function 取终点(
 	终点缓存.set(名称, 结果);
 	return 结果;
 }
-for (let 位 = 0; 位 < 5; 位++)
-	if (取终点(String(位 + 1)).键 !== 笔画键[位])
-		throw Error(
-			`笔画 ${位 + 1} 必须位于 ${笔画键[位].toUpperCase()}，以符合图上标记`,
-		);
+const 键笔画 = new Map<string, string[]>();
+for (const [位, 符号] of 笔画.entries()) {
+	const 键 = 取终点(String(位 + 1)).键;
+	const 符号组 = 键笔画.get(键) ?? [];
+	符号组.push(符号);
+	键笔画.set(键, 符号组);
+}
 
 // 与当前预算同口径：只有主根实际归并到声母锚点才免占例外额度。
 function 是声母归并(名称: string): boolean {
@@ -308,12 +294,12 @@ for (const [行号, 行] of 键序.entries()) {
 			色.字,
 			'font-family="Arial, sans-serif" font-weight="700"',
 		);
-		const 笔画位 = 笔画键.indexOf(键);
-		if (笔画位 >= 0)
+		const 笔画标记 = 键笔画.get(键);
+		if (笔画标记)
 			文本(
 				横 + 格宽 - 15,
 				纵 + 32,
-				笔画[笔画位],
+				笔画标记.join(""),
 				27,
 				色.字,
 				'text-anchor="end"',
@@ -382,7 +368,8 @@ function 统计字根(基本: boolean) {
 	);
 	return `${组.length} 组 ${组.reduce((和, 项) => 和 + 项.字根.length, 0)} 个`;
 }
-const 统计文本 = `基本字根 ${统计字根(true)}・扩展字根 ${统计字根(false)}`;
+const 例外组数 = [...分组.values()].filter((组) => 组.无理).length;
+const 统计文本 = `基本字根 ${统计字根(true)}・扩展字根 ${统计字根(false)}（非声母归并 ${例外组数} 组）`;
 文本(边距, 纵 + 20, 统计文本, 15, "#617380");
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 ${宽} ${页高}" role="img" aria-labelledby="title desc">
 <title id="title">冰雪飞花 beta 字根图</title><desc id="desc">键序 AOEIUV;/、BPMFDTNL、GKHWJQXY、ZCSR,.。归并字根同组排列，右下两格为取码规则。</desc>
@@ -390,21 +377,23 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm
 <g font-family="PingFang SC, Noto Sans CJK SC, Source Han Sans SC, sans-serif" transform="translate(${平移横} ${平移纵}) scale(${缩放})">${片段.join("\n")}</g></svg>\n`;
 mkdirSync(dirname(前缀), { recursive: true });
 writeFileSync(`${前缀}.svg`, SVG);
-const 转换 = spawnSync(
-	参数.get("--inkscape") ?? "inkscape",
-	[
-		`${前缀}.svg`,
-		"--export-area-page",
-		"--export-type=pdf",
-		"--export-text-to-path",
-		`--export-filename=${前缀}.pdf`,
-	],
-	{ encoding: "utf8" },
-);
-if (转换.error || 转换.status !== 0)
-	throw Error(
-		`SVG 已写入 ${前缀}.svg；PDF 转换失败（退出码 ${转换.status}，信号 ${转换.signal}）。请安装 Inkscape 或通过 --inkscape 指定路径。\n${转换.error?.message ?? 转换.stderr}`,
+for (const 格式 of ["png", "pdf"]) {
+	const 转换 = spawnSync(
+		参数.get("--inkscape") ?? "inkscape",
+		[
+			`${前缀}.svg`,
+			"--export-area-page",
+			`--export-type=${格式}`,
+			格式 === "pdf" ? "--export-text-to-path" : "--export-width=2520",
+			`--export-filename=${前缀}.${格式}`,
+		],
+		{ encoding: "utf8" },
 	);
+	if (转换.error || 转换.status !== 0)
+		throw Error(
+			`SVG 已写入 ${前缀}.svg；${格式.toUpperCase()} 转换失败（退出码 ${转换.status}，信号 ${转换.signal}）。\n${转换.error?.message ?? 转换.stderr}`,
+		);
+}
 console.log(
-	`已屏蔽 ${屏蔽根.size} 个包围变形归并根；${统计文本}（含五笔画，共 ${根数} 个、${分组.size} 组）：\n${前缀}.svg\n${前缀}.pdf`,
+	`已屏蔽 ${屏蔽根.size} 个包围变形归并根；${统计文本}（含五笔画，共 ${根数} 个、${分组.size} 组）：\n${前缀}.svg\n${前缀}.png\n${前缀}.pdf`,
 );

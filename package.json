@@ -5,6 +5,7 @@
 	"scripts": {
 		"check": "biome check . --error-on-warnings",
 		"check:fix": "biome check . --write --error-on-warnings",
+		"typecheck": "tsc --noEmit",
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"keywords": [],
@@ -20,6 +21,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.6.6",
-		"@types/js-yaml": "^4.0.9"
+		"@types/js-yaml": "^4.0.9",
+		"typescript": "^6.0.3"
 	}
 }
