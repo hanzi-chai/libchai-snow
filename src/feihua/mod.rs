@@ -48,7 +48,10 @@ struct 输入 {
 #[derive(Deserialize)]
 struct 输入根 {
     名称: String,
-    类别: u8,
+    类别: Option<u8>,
+    落键: Option<键域>,
+    #[serde(default)]
+    核心: bool,
     初始: Option<配置安排>,
     空间: Vec<配置安排>,
 }
@@ -92,18 +95,163 @@ struct 输入字根字 {
     重复: u8,
 }
 
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+enum 键域 {
+    小集合,
+    补集合,
+    全集合,
+}
+impl 键域 {
+    fn 包含(self, 键: u8) -> bool {
+        键 != 0
+            && match self {
+                Self::小集合 => 是小集合(键),
+                Self::补集合 => !是小集合(键),
+                Self::全集合 => true,
+            }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum 布局 {
     关闭,
     键(u8),
-    声(u8),
+    声(u8, Option<usize>),
     归并(usize),
 }
 struct 根 {
     名称: String,
-    类别: u8,
+    落键: 键域,
+    核心: bool,
     空间: Vec<布局>,
 }
+impl 根 {
+    fn 是备选(&self) -> bool {
+        self.空间.first() == Some(&布局::关闭)
+    }
+}
+
+struct 归并索引 {
+    下游: Vec<Vec<usize>>,
+    联动: Vec<Vec<usize>>,
+}
+impl 归并索引 {
+    fn 新建(根列表: &[根]) -> Self {
+        let mut 下游 = vec![Vec::new(); 根列表.len()];
+        for (r, 根) in 根列表.iter().enumerate() {
+            for &安排 in &根.空间 {
+                if let 布局::归并(目标) = 安排 {
+                    下游[目标].push(r);
+                }
+            }
+        }
+        let mut 已访问 = vec![false; 根列表.len()];
+        let mut 联动 = Vec::new();
+        let mut 分量 = Vec::new();
+        for 起点 in 0..根列表.len() {
+            if 已访问[起点] {
+                continue;
+            }
+            已访问[起点] = true;
+            分量.clear();
+            分量.push(起点);
+            let mut i = 0;
+            while i < 分量.len() {
+                let r = 分量[i];
+                let 目标 = 根列表[r].空间.iter().filter_map(|安排| match 安排 {
+                    布局::归并(目标) => Some(*目标),
+                    _ => None,
+                });
+                // 固定终点不传递约束，可以让引用同一笔画的根独立采样。
+                for 邻 in 下游[r].iter().copied().chain(目标) {
+                    let 固定终点 = |r: usize| {
+                        matches!(根列表[r].空间.as_slice(), [布局::键(_) | 布局::声(..)])
+                    };
+                    if !已访问[邻] && !固定终点(r) && !固定终点(邻) {
+                        已访问[邻] = true;
+                        分量.push(邻);
+                    }
+                }
+                i += 1;
+            }
+            let 可变: Vec<_> = 分量
+                .iter()
+                .copied()
+                .filter(|&r| 根列表[r].空间.len() > 1)
+                .collect();
+            if 可变.len() > 1 {
+                联动.push(可变);
+            }
+        }
+        Self { 下游, 联动 }
+    }
+}
+#[derive(Clone, Copy)]
+enum 解析标记 {
+    已知,
+    待解析,
+    解析中,
+}
+struct 键位解析器 {
+    标记: Vec<解析标记>,
+    路径: Vec<usize>,
+}
+impl 键位解析器 {
+    fn 新建(根数: usize) -> Self {
+        Self {
+            标记: vec![解析标记::已知; 根数],
+            路径: Vec::new(),
+        }
+    }
+
+    fn 解析(
+        &mut self,
+        根列表: &[根],
+        安排: &[usize],
+        待根: &[usize],
+        键位: &mut [u8],
+        变化: &mut Vec<(usize, u8)>,
+    ) -> Result<(), usize> {
+        for &r in 待根 {
+            self.标记[r] = 解析标记::待解析;
+        }
+        let 结果 = 待根.iter().try_for_each(|&起点| {
+            self.路径.clear();
+            let mut r = 起点;
+            let 键 = loop {
+                match self.标记[r] {
+                    解析标记::已知 => break 键位[r],
+                    解析标记::解析中 => return Err(r),
+                    解析标记::待解析 => {}
+                }
+                self.标记[r] = 解析标记::解析中;
+                self.路径.push(r);
+                match 根列表[r].空间[安排[r]] {
+                    布局::关闭 => break 0,
+                    布局::键(键) | 布局::声(键, _) => break 键,
+                    布局::归并(目标) => r = 目标,
+                }
+            };
+            for &r in self.路径.iter().rev() {
+                let 根 = &根列表[r];
+                if 根.空间[安排[r]] != 布局::关闭 && !根.落键.包含(键) {
+                    return Err(r);
+                }
+                if 键位[r] != 键 {
+                    变化.push((r, 键位[r]));
+                    键位[r] = 键;
+                }
+                self.标记[r] = 解析标记::已知;
+            }
+            Ok(())
+        });
+        for &r in 待根 {
+            self.标记[r] = 解析标记::已知;
+        }
+        结果
+    }
+}
+
 struct 候选 {
     根: Vec<usize>,
 }
@@ -206,13 +354,15 @@ pub struct 上下文 {
     pub 配置: 配置,
     输入校验: u64,
     根: Vec<根>,
-    拓扑: Vec<usize>,
+    声母锚点: Vec<String>,
+    归并: 归并索引,
     候选: Vec<候选>,
     部件: Vec<部件数据>,
     字: Vec<字数据>,
     根部件: Vec<Vec<usize>>,
     根字: Vec<Vec<usize>>,
     部件字: Vec<Vec<usize>>,
+    部件整字: Vec<Vec<usize>>,
     可换拆分: Vec<usize>,
     可换根: Vec<usize>,
     可重复: Vec<usize>,
@@ -227,7 +377,7 @@ impl 上下文 {
             (哈希 ^ 字节 as u64).wrapping_mul(0x100000001b3)
         });
         let 输入: 输入 = serde_json::from_slice(&字节)?;
-        检查(输入.版本 == 1, "不支持的飞花输入版本")?;
+        检查(matches!(输入.版本, 1 | 2), "不支持的飞花输入版本")?;
         // 使用 libchai 配置结构读取；另保留原始值，防止旧结构丢弃 fusion/glyphs 等字段。
         let 配置: 配置 = serde_json::from_value(输入.配置.clone())?;
         let mut 字母表 = 配置.form.alphabet.as_bytes().to_vec();
@@ -251,6 +401,14 @@ impl 上下文 {
                 .copied()
                 .ok_or_else(|| 报错(format!("未知字根：{名称}")))
         };
+        let mut 声母锚点: Vec<_> = 配置
+            .form
+            .mapping
+            .keys()
+            .filter(|名称| 名称.starts_with("声-"))
+            .cloned()
+            .collect();
+        声母锚点.sort_unstable();
         let 展开 = |安排: &配置安排| -> 结果<Vec<布局>> {
             match 安排 {
                 配置安排::Basic(键) => Ok(vec![布局::键(键号(键)?)]),
@@ -269,7 +427,9 @@ impl 上下文 {
                     };
                     let 键 = 键号(键)?;
                     检查(!是小集合(键), "声母锚点不能位于 B")?;
-                    Ok(vec![布局::声(键)])
+                    let 锚点 = (输入.版本 == 2)
+                        .then(|| 声母锚点.binary_search(element).expect("已声明的声母锚点"));
+                    Ok(vec![布局::声(键, 锚点)])
                 }
                 配置安排::Grouped { element } => Ok(vec![布局::归并(取根(element)?)]),
                 配置安排::Unused(_) => Ok(vec![布局::关闭]),
@@ -298,9 +458,25 @@ impl 上下文 {
         let mut 根列表 = Vec::new();
         let mut 初始安排 = Vec::new();
         for 根 in &输入.字根 {
-            检查((1..=5).contains(&根.类别), "无效字根类别")?;
+            let (落键, 核心, 备选) = if 输入.版本 == 1 {
+                match 根.类别 {
+                    Some(1 | 2) => (键域::小集合, true, false),
+                    Some(3) => (键域::补集合, false, false),
+                    Some(4) => (键域::全集合, false, false),
+                    Some(5) => (键域::小集合, false, true),
+                    _ => return Err(报错("无效旧版字根类别")),
+                }
+            } else {
+                let 落键 = 根.落键.ok_or_else(|| 报错("缺少字根键域"))?;
+                (落键, 根.核心, 根.初始.is_none())
+            };
+            检查(
+                !(核心 || 备选) || 落键 == 键域::小集合,
+                "核心根和动态候选必须位于小集合",
+            )?;
+            检查(!(核心 && 备选), "核心根必须始终启用")?;
             let mut 空间 = Vec::new();
-            if 根.类别 == 5 {
+            if 备选 {
                 空间.push(布局::关闭);
             }
             for 安排 in &根.空间 {
@@ -316,10 +492,10 @@ impl 上下文 {
                 .map(&展开)
                 .transpose()?
                 .unwrap_or_else(|| vec![布局::关闭]);
-            检查(根.类别 != 5 || 空间.len() > 1, "第五类字根必须有可启用安排")?;
+            检查(!备选 || 空间.len() > 1, "动态候选必须有可启用安排")?;
             检查(
-                初始.len() == 1 && (初始[0] == 布局::关闭) == (根.类别 == 5),
-                "字根初始启用状态与类别不一致",
+                初始.len() == 1 && (初始[0] == 布局::关闭) == 备选,
+                "字根初始启用状态与键域声明不一致",
             )?;
             let 配置初始 = 配置
                 .form
@@ -355,28 +531,20 @@ impl 上下文 {
             )?;
             for &值 in &空间 {
                 let 合法 = match 值 {
-                    布局::关闭 => 根.类别 == 5,
-                    布局::键(键) => {
-                        if 根.类别 == 3 {
-                            !是小集合(键)
-                        } else if 根.类别 == 4 {
-                            true
-                        } else {
-                            是小集合(键)
-                        }
-                    }
-                    布局::声(_) => 根.类别 == 3 || 根.类别 == 4,
-                    布局::归并(目标) => match 根.类别 {
-                        2 => matches!(输入.字根[目标].类别, 1 | 2),
-                        3 => 输入.字根[目标].类别 == 3,
-                        4 => matches!(输入.字根[目标].类别, 2..=4),
-                        5 => matches!(输入.字根[目标].类别, 2 | 5),
-                        _ => false,
-                    },
+                    布局::关闭 => 备选,
+                    布局::键(键) => 落键.包含(键),
+                    布局::声(..) | 布局::归并(_) => true,
                 };
-                检查(合法, "字根安排违反类别约束，可能使复合体进入 B")?;
+                if !合法 {
+                    return Err(报错(format!("字根安排超出允许键域：{}", 根.名称)));
+                }
             }
-            检查(根.类别 != 1 || 空间.len() == 1, "第一类笔画不能移动")?;
+            if matches!(根.名称.as_str(), "1" | "2" | "3" | "4" | "5") {
+                检查(
+                    核心 && matches!(空间.as_slice(), [布局::键(_)]),
+                    "笔画必须固定在小集合并属于核心",
+                )?;
+            }
             初始安排.push(
                 空间
                     .iter()
@@ -385,32 +553,12 @@ impl 上下文 {
             );
             根列表.push(根 {
                 名称: 根.名称.clone(),
-                类别: 根.类别,
+                落键,
+                核心,
                 空间,
             });
         }
-        fn 排序(
-            i: usize, 根列表: &[根], 标记: &mut [u8], 序列: &mut Vec<usize>
-        ) -> 结果<()> {
-            if 标记[i] == 2 {
-                return Ok(());
-            }
-            检查(标记[i] != 1, "字根决策空间归并成环")?;
-            标记[i] = 1;
-            for &安排 in &根列表[i].空间 {
-                if let 布局::归并(j) = 安排 {
-                    排序(j, 根列表, 标记, 序列)?;
-                }
-            }
-            标记[i] = 2;
-            序列.push(i);
-            Ok(())
-        }
-        let mut 拓扑 = Vec::new();
-        let mut 标记 = vec![0; 根列表.len()];
-        for i in 0..根列表.len() {
-            排序(i, &根列表, &mut 标记, &mut 拓扑)?;
-        }
+        let 归并 = 归并索引::新建(&根列表);
         let 部件索引: FxHashMap<_, _> = 输入
             .部件
             .iter()
@@ -475,9 +623,9 @@ impl 上下文 {
                 检查(已用 == 全掩码, "拆分未完整覆盖部件")?;
                 永久覆盖 |= 分法
                     .iter()
-                    .all(|&j| 候选列表[起点 + j].根.iter().any(|&r| 根列表[r].类别 <= 2));
+                    .all(|&j| 候选列表[起点 + j].根.iter().any(|&r| 根列表[r].核心));
             }
-            检查(永久覆盖, "缺少第一、二类字根组成的永久 B 拆分")?;
+            检查(永久覆盖, "缺少核心字根组成的完整拆分")?;
             部件列表.push(部件数据 {
                 id: 件.id,
                 候选: 起点..候选列表.len(),
@@ -498,7 +646,7 @@ impl 上下文 {
         let mut 唯一字音 = FxHashSet::default();
         let mut 根字 = vec![Vec::new(); 根列表.len()];
         let mut 部件字 = vec![Vec::new(); 部件列表.len()];
-        let mut 自身 = vec![false; 部件列表.len()];
+        let mut 部件整字 = vec![Vec::new(); 部件列表.len()];
         for 字 in &输入.字 {
             let 字符: Vec<_> = 字.字.chars().collect();
             检查(
@@ -509,7 +657,6 @@ impl 上下文 {
             let 整字;
             if let Some(&件) = 部件索引.get(&字.字形) {
                 整字 = Some(件);
-                自身[件] = true;
             } else {
                 整字 = None;
                 let 形 = 复合表
@@ -518,7 +665,7 @@ impl 上下文 {
                 来源表[0] = match &形.正根 {
                     输入正根::完整 { 字根 } => {
                         let r = 取根(字根)?;
-                        检查(根列表[r].类别 != 5, "完整正根必须初始启用")?;
+                        检查(!根列表[r].是备选(), "完整正根必须初始启用")?;
                         来源::根(r)
                     }
                     输入正根::首根 { 部件 } => 来源::部件(取部件(*部件)?, 0),
@@ -545,6 +692,7 @@ impl 上下文 {
                 let i = 字列表.len();
                 if let Some(件) = 整字 {
                     部件字[件].push(i);
+                    部件整字[件].push(i);
                 }
                 for &来源 in &来源表 {
                     match 来源 {
@@ -571,10 +719,10 @@ impl 上下文 {
             检查((1..=3).contains(&条.重复), "重复次数必须为 1–3")?;
             重复[取部件(条.字形)?] = 条.重复;
         }
-        let 可重复 = 自身
+        let 可重复 = 部件整字
             .iter()
             .enumerate()
-            .filter_map(|(i, &值)| 值.then_some(i))
+            .filter_map(|(i, 字)| (!字.is_empty()).then_some(i))
             .collect();
         let 可换拆分 = 部件列表
             .iter()
@@ -594,7 +742,7 @@ impl 上下文 {
         let 备选 = 根列表
             .iter()
             .enumerate()
-            .filter_map(|(i, 根)| (根.类别 == 5).then_some(i))
+            .filter_map(|(i, 根)| (根.是备选()).then_some(i))
             .collect();
         let 初始 = 决策 {
             安排: 初始安排,
@@ -607,13 +755,15 @@ impl 上下文 {
             配置,
             输入校验,
             根: 根列表,
-            拓扑,
+            声母锚点,
+            归并,
             候选: 候选列表,
             部件: 部件列表,
             字: 字列表,
             根部件,
             根字,
             部件字,
+            部件整字,
             可换拆分,
             可换根,
             可重复,
@@ -688,8 +838,11 @@ impl 上下文 {
                 }
                 布局::键(键) => Value::String((键表[键 as usize - 1] as char).to_string()),
                 布局::归并(j) => serde_json::json!({ "element": self.根[j].名称 }),
-                布局::声(_) => {
-                    // 保留声母锚点的实际名称，避免把同键安排误当归并。
+                布局::声(_, Some(锚点)) => {
+                    serde_json::json!({ "element": self.声母锚点[锚点] })
+                }
+                布局::声(键, None) => {
+                    // 旧输入按键合并同键声母，沿用旧快照的锚点选择。
                     let 原 = self.配置.form.mapping.get(&根.名称).into_iter().chain(
                         self.配置
                             .form
@@ -700,7 +853,6 @@ impl 上下文 {
                             .flatten()
                             .map(|项| &项.value),
                     );
-                    let 键 = 状态.键[i];
                     let 名 = 原.filter_map(|项| if let 配置安排::Grouped { element } = 项 { Some(element) } else { None }).find(|名| {
                         名.starts_with("声-") && matches!(self.配置.form.mapping.get(*名), Some(配置安排::Basic(字母)) if 键号(字母).ok() == Some(键))
                     }).ok_or_else(|| 报错("未找到声母锚点"))?;
@@ -792,13 +944,11 @@ impl 上下文 {
                 .种子
                 .wrapping_add((线程序号 as u64).wrapping_mul(0x9e3779b97f4a7c15)),
         );
-        let mut 可移动: Vec<_> = self
+        let 可移动: Vec<_> = self
             .根
             .iter()
             .enumerate()
-            .filter_map(|(i, 根)| {
-                (根.空间.len() > 1 && 根.空间[状态.决策.安排[i]] != 布局::关闭).then_some(i)
-            })
+            .filter_map(|(i, 根)| (根.空间.len() > 1 && !根.是备选()).then_some(i))
             .collect();
         let mut 工作 = 工作区::新建(self);
         let 目录 = 输出.map(|目录| 目录.join(线程序号.to_string()));
@@ -816,7 +966,7 @@ impl 上下文 {
         let 开始 = Instant::now();
         for 步 in 1..=参数.步数 {
             工作.清空();
-            let 添加 = self.提议(&mut 状态, &mut 工作, &mut 随机, &可移动);
+            self.提议(&mut 状态, &mut 工作, &mut 随机, &可移动);
             if !工作.安排.is_empty()
                 || !工作.拆分.is_empty()
                 || !工作.选根.is_empty()
@@ -825,19 +975,19 @@ impl 上下文 {
                 有效步数 += 1;
                 let 原小 = 状态.小组;
                 let 原补 = 状态.补组;
-                let 合法 = self.更新(&mut 状态, &mut 工作, &mut 随机, 添加.is_some());
+                let 启用数 = 工作
+                    .安排
+                    .iter()
+                    .filter(|&&(r, 旧)| self.根[r].空间[旧] == 布局::关闭)
+                    .count();
+                let 合法 = self.更新(&mut 状态, &mut 工作, &mut 随机, 启用数 > 0);
                 let 新指标 = 状态.指标(参数.预算);
                 let 差 = 新指标.分数 - 当前分数;
-                let 接受 = 合法
-                    && (添加.is_none() || !工作.编码.is_empty())
-                    && (差 <= 0.0 || 随机.小数() < (-差 / 温度).exp());
+                let 接受 = 合法 && (差 <= 0.0 || 随机.小数().ln() < -差 / 温度);
                 if 接受 {
                     接受步数 += 1;
                     当前分数 = 新指标.分数;
-                    if let Some(根) = 添加 {
-                        可移动.push(根);
-                        添加字根 += 1;
-                    }
+                    添加字根 += 启用数;
                     if 当前分数 < 最优指标.分数 {
                         最优指标 = 新指标;
                         最优决策.clone_from(&状态.决策);
@@ -897,22 +1047,14 @@ impl 上下文 {
     }
 
     fn 提议(
-        &self,
-        状态: &mut 状态,
-        工作: &mut 工作区,
-        随机: &mut 随机,
-        可移动: &[usize],
-    ) -> Option<usize> {
+        &self, 状态: &mut 状态, 工作: &mut 工作区, 随机: &mut 随机, 可移动: &[usize]
+    ) {
         match 随机.范围(100) {
-            0..=49 if !可移动.is_empty() => {
+            0..=43 if !可移动.is_empty() => {
                 let r = 可移动[随机.范围(可移动.len())];
-                let 新 = 随机.范围(self.根[r].空间.len());
-                if self.根[r].空间[新] != 布局::关闭 && 新 != 状态.决策.安排[r] {
-                    工作.安排.push((r, 状态.决策.安排[r]));
-                    状态.决策.安排[r] = 新;
-                }
+                工作.改安排(状态, r, 随机.范围(self.根[r].空间.len()));
             }
-            50..=59 if 可移动.len() > 1 => {
+            44..=53 if 可移动.len() > 1 => {
                 let a = 可移动[随机.范围(可移动.len())];
                 let b = 可移动[随机.范围(可移动.len())];
                 if a != b {
@@ -934,7 +1076,7 @@ impl 上下文 {
                     }
                 }
             }
-            60..=81 if !self.可换拆分.is_empty() => {
+            54..=75 if !self.可换拆分.is_empty() => {
                 let 件 = self.可换拆分[随机.范围(self.可换拆分.len())];
                 let 新 = self.最短拆分(状态, 件, 随机, false).expect("永久 B 覆盖");
                 if 新 != 状态.决策.拆分[件] {
@@ -943,18 +1085,17 @@ impl 上下文 {
                     工作.标部件(件, false);
                 }
             }
-            82..=89 if !self.可重复.is_empty() => {
+            76..=83 if !self.可重复.is_empty() => {
                 let 件 = self.可重复[随机.范围(self.可重复.len())];
                 if self.部件[件].拆分[状态.决策.拆分[件]].len() == 1 {
                     let 新 = 随机.范围(3) as u8 + 1;
                     if 新 != 状态.决策.重复[件] {
                         工作.重复.push((件, 状态.决策.重复[件]));
                         状态.决策.重复[件] = 新;
-                        工作.标部件(件, false);
                     }
                 }
             }
-            90..=97 if !self.可换根.is_empty() => {
+            84..=91 if !self.可换根.is_empty() => {
                 let 件 = self.可换根[随机.范围(self.可换根.len())];
                 let 分法 = &self.部件[件].拆分[状态.决策.拆分[件]];
                 let 候选 = 分法[随机.范围(分法.len())];
@@ -966,18 +1107,28 @@ impl 上下文 {
                     工作.标部件(件, false);
                 }
             }
-            98..=99 if !self.备选.is_empty() => {
+            92..=97 if !self.备选.is_empty() => {
                 let r = self.备选[随机.范围(self.备选.len())];
-                if self.根[r].空间[状态.决策.安排[r]] == 布局::关闭 {
-                    let 新 = 随机.范围(self.根[r].空间.len() - 1) + 1;
-                    工作.安排.push((r, 状态.决策.安排[r]));
-                    状态.决策.安排[r] = 新;
-                    return Some(r);
+                let 空间 = self.根[r].空间.len();
+                let 新 = if 状态.决策.安排[r] != 0 && 随机.范围(4) == 0 {
+                    0
+                } else {
+                    1 + 随机.范围(空间 - 1)
+                };
+                工作.改安排(状态, r, 新);
+            }
+            98..=99 if !self.归并.联动.is_empty() => {
+                let 分量 = &self.归并.联动[随机.范围(self.归并.联动.len())];
+                // 整体重选保留所有合法组合的可达性，部分重选提高大分量的接受率。
+                let 整体 = 随机.范围(2) == 0;
+                for &r in 分量 {
+                    if 整体 || 随机.范围(2) == 0 {
+                        工作.改安排(状态, r, 随机.范围(self.根[r].空间.len()));
+                    }
                 }
             }
             _ => {}
         }
-        None
     }
     fn 最短拆分(
         &self, 状态: &状态, 件: usize, 随机: &mut 随机, 保留: bool
@@ -1003,47 +1154,69 @@ impl 上下文 {
         }
         选中
     }
+    fn 更新键位(&self, 状态: &mut 状态, 工作: &mut 工作区) -> bool {
+        for i in 0..工作.安排.len() {
+            工作.标根(工作.安排[i].0);
+        }
+        let mut i = 0;
+        while i < 工作.待根.len() {
+            let r = 工作.待根[i];
+            for &下游 in &self.归并.下游[r] {
+                if self.根[下游].空间[状态.决策.安排[下游]] == 布局::归并(r) {
+                    工作.标根(下游);
+                }
+            }
+            i += 1;
+        }
+        if 工作
+            .解析
+            .解析(
+                &self.根,
+                &状态.决策.安排,
+                &工作.待根,
+                &mut 状态.键,
+                &mut 工作.键,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        for &(r, 原位置) in &工作.安排 {
+            let 空间 = &self.根[r].空间;
+            if let 布局::键(键) = 空间[原位置] {
+                if 是小集合(键) {
+                    状态.小组 -= 1;
+                } else {
+                    状态.补组 -= 1;
+                }
+            }
+            if let 布局::键(键) = 空间[状态.决策.安排[r]] {
+                if 是小集合(键) {
+                    状态.小组 += 1;
+                } else {
+                    状态.补组 += 1;
+                }
+            }
+        }
+        for i in 0..工作.键.len() {
+            let (r, 旧) = 工作.键[i];
+            let 键 = 状态.键[r];
+            if 是小集合(旧) || 是小集合(键) {
+                for &件 in &self.根部件[r] {
+                    工作.标部件(件, 是小集合(旧) != 是小集合(键));
+                }
+            }
+            for &字 in &self.根字[r] {
+                工作.标字(字);
+            }
+        }
+        true
+    }
     fn 更新(
         &self, 状态: &mut 状态, 工作: &mut 工作区, 随机: &mut 随机, 添加: bool
     ) -> bool {
-        if !工作.安排.is_empty() {
-            状态.小组 = 0;
-            状态.补组 = 0;
-            let mut 合法 = true;
-            for &r in &self.拓扑 {
-                let 键 = match self.根[r].空间[状态.决策.安排[r]] {
-                    布局::关闭 => 0,
-                    布局::键(键) => {
-                        if 是小集合(键) {
-                            状态.小组 += 1;
-                        } else {
-                            状态.补组 += 1;
-                        }
-                        键
-                    }
-                    布局::声(键) => 键,
-                    布局::归并(j) => {
-                        合法 &= 状态.键[j] != 0;
-                        状态.键[j]
-                    }
-                };
-                let 旧 = 状态.键[r];
-                if 键 != 旧 {
-                    工作.键.push((r, 旧));
-                    状态.键[r] = 键;
-                    if 是小集合(旧) || 是小集合(键) {
-                        for &件 in &self.根部件[r] {
-                            工作.标部件(件, 是小集合(旧) != 是小集合(键));
-                        }
-                    }
-                    for &字 in &self.根字[r] {
-                        工作.标字(字);
-                    }
-                }
-            }
-            if !合法 {
-                return false;
-            }
+        if !工作.安排.is_empty() && !self.更新键位(状态, 工作) {
+            return false;
         }
         for i in 0..工作.待部件.len() {
             let 件 = 工作.待部件[i];
@@ -1074,9 +1247,17 @@ impl 上下文 {
             if 新码 != 状态.部件码[件] {
                 工作.部件码.push((件, 状态.部件码[件]));
                 状态.部件码[件] = 新码;
+                for &字 in &self.部件字[件] {
+                    工作.标字(字);
+                }
             }
-            for &字 in &self.部件字[件] {
-                工作.标字(字);
+        }
+        for i in 0..工作.重复.len() {
+            let (件, _) = 工作.重复[i];
+            if 状态.部件码[件][1] == 0 {
+                for &字 in &self.部件整字[件] {
+                    工作.标字(字);
+                }
             }
         }
         for &字 in &工作.待字 {
@@ -1119,28 +1300,31 @@ impl 状态 {
             小组: 0,
             补组: 0,
         };
-        for &r in &模型.拓扑 {
-            let 安排 = *模型.根[r]
-                .空间
-                .get(状态.决策.安排[r])
-                .ok_or_else(|| 报错("安排索引越界"))?;
-            状态.键[r] = match 安排 {
-                布局::关闭 => 0,
-                布局::键(键) => {
-                    if 是小集合(键) {
-                        状态.小组 += 1;
-                    } else {
-                        状态.补组 += 1;
-                    }
-                    键
+        for (根, &安排) in 模型.根.iter().zip(&状态.决策.安排) {
+            let 安排 = 根.空间.get(安排).ok_or_else(|| 报错("安排索引越界"))?;
+            if let 布局::键(键) = *安排 {
+                if 是小集合(键) {
+                    状态.小组 += 1;
+                } else {
+                    状态.补组 += 1;
                 }
-                布局::声(键) => 键,
-                布局::归并(j) => {
-                    检查(状态.键[j] != 0, "不能归并到未启用字根")?;
-                    状态.键[j]
-                }
-            };
+            }
         }
+        let 所有根: Vec<_> = (0..模型.根.len()).collect();
+        键位解析器::新建(模型.根.len())
+            .解析(
+                &模型.根,
+                &状态.决策.安排,
+                &所有根,
+                &mut 状态.键,
+                &mut Vec::new(),
+            )
+            .map_err(|r| {
+                报错(format!(
+                    "字根 {} 的归并成环、目标未启用或超出允许键域",
+                    模型.根[r].名称
+                ))
+            })?;
         for (i, 候选) in 模型.候选.iter().enumerate() {
             let 可用 = 候选.根.iter().copied().find(|&r| 是小集合(状态.键[r]));
             if !严格 {
@@ -1253,12 +1437,15 @@ struct 工作区 {
     选根: Vec<(usize, usize)>,
     重复: Vec<(usize, u8)>,
     键: Vec<(usize, u8)>,
+    解析: 键位解析器,
     部件码: Vec<(usize, [u8; 3])>,
     编码: Vec<(usize, u32)>,
+    根标记: Vec<u32>,
     部件标记: Vec<u32>,
     重选标记: Vec<u32>,
     字标记: Vec<u32>,
     轮次: u32,
+    待根: Vec<usize>,
     待部件: Vec<usize>,
     待字: Vec<usize>,
 }
@@ -1270,12 +1457,15 @@ impl 工作区 {
             选根: Vec::new(),
             重复: Vec::new(),
             键: Vec::new(),
+            解析: 键位解析器::新建(模型.根.len()),
             部件码: Vec::new(),
             编码: Vec::new(),
+            根标记: vec![0; 模型.根.len()],
             部件标记: vec![0; 模型.部件.len()],
             重选标记: vec![0; 模型.部件.len()],
             字标记: vec![0; 模型.字.len()],
             轮次: 0,
+            待根: Vec::new(),
             待部件: Vec::new(),
             待字: Vec::new(),
         }
@@ -1288,14 +1478,29 @@ impl 工作区 {
         self.键.clear();
         self.部件码.clear();
         self.编码.clear();
+        self.待根.clear();
         self.待部件.clear();
         self.待字.clear();
         self.轮次 = self.轮次.wrapping_add(1);
         if self.轮次 == 0 {
+            self.根标记.fill(0);
             self.部件标记.fill(0);
             self.重选标记.fill(0);
             self.字标记.fill(0);
             self.轮次 = 1;
+        }
+    }
+    fn 改安排(&mut self, 状态: &mut 状态, 根: usize, 新: usize) {
+        let 旧 = 状态.决策.安排[根];
+        if 新 != 旧 {
+            self.安排.push((根, 旧));
+            状态.决策.安排[根] = 新;
+        }
+    }
+    fn 标根(&mut self, 根: usize) {
+        if self.根标记[根] != self.轮次 {
+            self.根标记[根] = self.轮次;
+            self.待根.push(根);
         }
     }
     fn 标部件(&mut self, 件: usize, 重选: bool) {
@@ -1366,44 +1571,57 @@ mod tests {
         let 根 = vec![
             根 {
                 名称: "1".into(),
-                类别: 1,
+                落键: 键域::小集合,
+                核心: true,
                 空间: vec![布局::键(a)],
             },
             根 {
                 名称: "2".into(),
-                类别: 1,
+                落键: 键域::小集合,
+                核心: true,
                 空间: vec![布局::键(o)],
             },
             根 {
                 名称: "字形-00002".into(),
-                类别: 4,
+                落键: 键域::全集合,
+                核心: false,
                 空间: vec![
                     布局::键(a),
                     布局::键(3),
                     布局::键(b),
                     布局::归并(4),
-                    布局::声(b),
+                    布局::声(b, None),
                 ],
             },
             根 {
                 名称: "字形-f0000".into(),
-                类别: 5,
+                落键: 键域::小集合,
+                核心: false,
                 空间: vec![布局::关闭, 布局::键(5)],
             },
             根 {
                 名称: "字形-00004".into(),
-                类别: 2,
+                落键: 键域::小集合,
+                核心: true,
                 空间: std::iter::once(布局::归并(0))
                     .chain((1..=8).map(布局::键))
                     .collect(),
             },
+            根 {
+                名称: "字形-00005".into(),
+                落键: 键域::全集合,
+                核心: false,
+                空间: vec![布局::归并(2)],
+            },
         ];
+        let 归并 = 归并索引::新建(&根);
         let mut 模型 = 上下文 {
             原配置: Value::Null,
             配置: 配置::default(),
             输入校验: 0,
             根,
-            拓扑: vec![0, 1, 4, 2, 3],
+            声母锚点: vec![],
+            归并,
             候选: vec![
                 候选 { 根: vec![2, 3] },
                 候选 { 根: vec![0] },
@@ -1432,7 +1650,7 @@ mod tests {
                 字数据 {
                     字: '乙',
                     声: b,
-                    来源: [来源::根(2), 来源::部件(1, 0), 来源::空],
+                    来源: [来源::根(5), 来源::部件(1, 0), 来源::空],
                     整字: None,
                 },
                 字数据 {
@@ -1442,15 +1660,16 @@ mod tests {
                     整字: Some(1),
                 },
             ],
-            根部件: vec![vec![0, 1], vec![0], vec![0], vec![0], vec![]],
-            根字: vec![vec![], vec![], vec![1], vec![], vec![]],
+            根部件: vec![vec![0, 1], vec![0], vec![0], vec![0], vec![], vec![]],
+            根字: vec![vec![], vec![], vec![], vec![], vec![], vec![1]],
             部件字: vec![vec![0], vec![1, 2]],
+            部件整字: vec![vec![0], vec![2]],
             可换拆分: vec![0],
             可换根: vec![0],
             可重复: vec![0, 1],
             备选: vec![3],
             初始: 决策 {
-                安排: vec![0; 5],
+                安排: vec![0; 6],
                 拆分: vec![0; 2],
                 选根: vec![无根; 4],
                 重复: vec![1; 2],
@@ -1458,6 +1677,34 @@ mod tests {
         };
         模型.初始 = 状态::新建(&模型, 模型.初始.clone(), false).unwrap().决策;
         模型
+    }
+    #[test]
+    fn 同键归并计入组数且同时改键沿归并链传播() {
+        let 模型 = 小模型();
+        let mut 状态 = 状态::新建(&模型, 模型.初始.clone(), true).unwrap();
+        let mut 工作 = 工作区::新建(&模型);
+        let mut 随机 = 随机::新建(7);
+        let 原小组 = 状态.小组;
+
+        工作.清空();
+        工作.安排.push((2, 0));
+        状态.决策.安排[2] = 3;
+        assert!(模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+        assert!(工作.键.is_empty() && 工作.待字.is_empty());
+        assert_eq!(状态.小组, 原小组 - 1);
+        状态.核验(&模型).unwrap();
+        工作.回退(&mut 状态);
+        状态.小组 = 原小组;
+
+        工作.清空();
+        // 子根先写入试探，父根仍须先解析新键。
+        工作.安排.extend([(2, 0), (4, 0)]);
+        状态.决策.安排[2] = 3;
+        状态.决策.安排[4] = 键号("o").unwrap() as usize;
+        assert!(模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+        assert_eq!(状态.小组, 原小组);
+        assert_eq!(状态.键[5], 键号("o").unwrap());
+        状态.核验(&模型).unwrap();
     }
     #[test]
     fn 跨区修复和回退保持最少根及计数() {
@@ -1490,40 +1737,121 @@ mod tests {
         工作.清空();
         工作.重复.push((1, 1));
         状态.决策.重复[1] = 3;
-        工作.标部件(1, false);
         模型.更新(&mut 状态, &mut 工作, &mut 随机::新建(8), false);
+        assert_eq!(工作.待字, vec![2]);
         assert_eq!(状态.码[1], 乙);
         assert_ne!(状态.码[2], 丙);
         状态.核验(&模型).unwrap();
     }
     #[test]
-    fn 混合变异逐步对照全量并核查单调加根() {
+    fn 混合变异逐步对照全量并核查备选可撤回() {
         let 模型 = 小模型();
         let mut 状态 = 状态::新建(&模型, 模型.初始.clone(), true).unwrap();
         let mut 工作 = 工作区::新建(&模型);
         let mut 随机 = 随机::新建(19);
-        let mut 可移动 = vec![2, 4];
+        let mut 曾启用 = false;
+        let mut 曾关闭 = false;
         for _ in 0..1000 {
             let 原 = 状态.决策.clone();
             let 原组 = (状态.小组, 状态.补组);
             工作.清空();
-            let 添加 = 模型.提议(&mut 状态, &mut 工作, &mut 随机, &可移动);
-            assert!(模型.更新(&mut 状态, &mut 工作, &mut 随机, 添加.is_some()));
-            状态.核验(&模型).unwrap();
-            if 随机.范围(2) == 0 {
+            模型.提议(&mut 状态, &mut 工作, &mut 随机, &[2, 4]);
+            let 合法 = 模型.更新(&mut 状态, &mut 工作, &mut 随机, false);
+            if !合法 || 随机.范围(2) == 0 {
                 工作.回退(&mut 状态);
                 (状态.小组, 状态.补组) = 原组;
                 assert_eq!(状态.决策, 原);
             } else {
-                if let Some(r) = 添加 {
-                    可移动.push(r);
-                }
-                if 原.安排[3] != 0 {
-                    assert_ne!(状态.决策.安排[3], 0);
-                }
+                曾启用 |= 原.安排[3] == 0 && 状态.决策.安排[3] != 0;
+                曾关闭 |= 原.安排[3] != 0 && 状态.决策.安排[3] == 0;
             }
             状态.核验(&模型).unwrap();
         }
+        assert!(曾启用 && 曾关闭);
+    }
+    #[test]
+    fn 核心与复合体只能联动交换目标的键域() {
+        let mut 模型 = 小模型();
+        let 小键 = 键号("a").unwrap();
+        let 补键 = 键号("b").unwrap();
+        模型.根[2].空间 = vec![布局::键(小键), 布局::键(补键)];
+        模型.根[4].落键 = 键域::全集合;
+        模型.根[4].核心 = false;
+        模型.根[4].空间 = vec![布局::键(补键), 布局::键(小键)];
+        模型.根[5].落键 = 键域::补集合;
+        模型.根[5].空间 = vec![布局::归并(4), 布局::归并(2)];
+        模型.根.push(根 {
+            名称: "核心根".into(),
+            落键: 键域::小集合,
+            核心: true,
+            空间: vec![布局::归并(2), 布局::归并(4)],
+        });
+        模型.根部件.push(vec![]);
+        模型.根字.push(vec![]);
+        模型.初始.安排.push(0);
+        模型.归并 = 归并索引::新建(&模型.根);
+        let mut 状态 = 状态::新建(&模型, 模型.初始.clone(), true).unwrap();
+        let mut 工作 = 工作区::新建(&模型);
+        let mut 随机 = 随机::新建(24);
+        for r in [2, 4, 5, 6] {
+            工作.清空();
+            工作.改安排(&mut 状态, r, 1);
+            assert!(状态::新建(&模型, 状态.决策.clone(), false).is_err());
+            assert!(!模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+            工作.回退(&mut 状态);
+            状态.核验(&模型).unwrap();
+        }
+        let 分量 = &模型.归并.联动[0];
+        assert_eq!(分量.len(), 4);
+        assert!([2, 4, 5, 6].iter().all(|r| 分量.contains(r)));
+        let mut 提议联动 = false;
+        for _ in 0..8192 {
+            工作.清空();
+            模型.提议(&mut 状态, &mut 工作, &mut 随机, &[]);
+            if 分量.iter().all(|&r| 状态.决策.安排[r] == 1) {
+                提议联动 = true;
+                break;
+            }
+            工作.回退(&mut 状态);
+        }
+        assert!(提议联动);
+        assert!(模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+        assert_eq!(状态.键[5], 补键);
+        assert_eq!(状态.键[6], 小键);
+        状态.核验(&模型).unwrap();
+    }
+    #[test]
+    fn 候选双向归并允许但选中环及关闭目标会回滚() {
+        let mut 模型 = 小模型();
+        let 双向 = 模型.根[4].空间.len();
+        模型.根[4].空间.extend([布局::归并(2), 布局::归并(3)]);
+        模型.归并 = 归并索引::新建(&模型.根);
+        let mut 状态 = 状态::新建(&模型, 模型.初始.clone(), true).unwrap();
+        let mut 工作 = 工作区::新建(&模型);
+        let mut 随机 = 随机::新建(28);
+
+        工作.清空();
+        工作.改安排(&mut 状态, 2, 3);
+        工作.改安排(&mut 状态, 4, 双向);
+        assert!(!模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+        工作.回退(&mut 状态);
+        状态.核验(&模型).unwrap();
+
+        工作.清空();
+        工作.改安排(&mut 状态, 4, 双向 + 1);
+        assert!(!模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+        工作.回退(&mut 状态);
+        工作.清空();
+        工作.改安排(&mut 状态, 4, 双向 + 1);
+        工作.改安排(&mut 状态, 3, 1);
+        assert!(模型.更新(&mut 状态, &mut 工作, &mut 随机, true));
+        状态.核验(&模型).unwrap();
+
+        工作.清空();
+        工作.改安排(&mut 状态, 3, 0);
+        assert!(!模型.更新(&mut 状态, &mut 工作, &mut 随机, false));
+        工作.回退(&mut 状态);
+        状态.核验(&模型).unwrap();
     }
     #[test]
     fn 预算仅惩罚超额且同键独立字根分别计组() {

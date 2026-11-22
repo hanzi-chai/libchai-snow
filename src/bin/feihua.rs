@@ -1,6 +1,35 @@
 use clap::{Args, Parser, Subcommand};
 use snow::feihua::{上下文, 退火参数, 错误, 预算};
-use std::{path::PathBuf, process::Command, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    time::Instant,
+};
+
+fn 后处理(输入: &Path, 目录: &Path, 预算: 预算) -> Result<(), 错误> {
+    let 状态 = Command::new("bun")
+        .arg("src/feihua/postprocess.ts")
+        .arg("--tree-data")
+        .arg(输入)
+        .arg("--solution")
+        .arg(目录.join("best/solution.json"))
+        .arg("--encoder")
+        .arg(std::env::current_exe()?)
+        .arg("--b-budget")
+        .arg(预算.小集合.to_string())
+        .arg("--complement-budget")
+        .arg(预算.补集合.to_string())
+        .arg("--budget-penalty")
+        .arg(预算.惩罚.to_string())
+        .status()?;
+    if !状态.success() {
+        return Err(std::io::Error::other(
+            "最优解已保存，但飞花后处理失败，请重新运行 postprocess.ts",
+        )
+        .into());
+    }
+    Ok(())
+}
 
 #[derive(Parser)]
 #[command(about = "冰雪飞花：增量编码与多线程模拟退火")]
@@ -22,7 +51,10 @@ enum 命令 {
         #[command(flatten)]
         预算: 预算参数,
     },
-    #[command(name = "optimize", about = "独立多线程退火，保存各线程及全局最优结果")]
+    #[command(
+        name = "optimize",
+        about = "独立多线程退火，保存最优结果并生成小鱼数据、拆分报告和字根图"
+    )]
     优化(优化参数),
     #[command(name = "bench", about = "运行真实退火循环测量步耗时，默认不写产物")]
     基准(优化参数),
@@ -47,8 +79,9 @@ impl 预算参数 {
 }
 #[derive(Args)]
 struct 优化参数 {
-    #[arg(short = 't', long = "threads", default_value_t = 1)]
-    线程: usize,
+    /// 线程数，优化默认使用可用并行度，基准默认单线程
+    #[arg(short = 't', long = "threads")]
+    线程: Option<usize>,
     /// 每个线程的步数；默认采用配置中的 steps
     #[arg(long = "steps")]
     步数: Option<usize>,
@@ -107,7 +140,13 @@ fn main() -> Result<(), 错误> {
         命令::优化(选项) | 命令::基准(选项) => {
             let 默认 = 上下文.默认参数();
             let 运行 = 退火参数 {
-                线程: 选项.线程,
+                线程: 选项.线程.unwrap_or_else(|| {
+                    if 是基准 {
+                        1
+                    } else {
+                        std::thread::available_parallelism().map_or(1, |数量| 数量.get())
+                    }
+                }),
                 步数: 选项.步数.unwrap_or(默认.0),
                 最高温: 选项.最高温.unwrap_or(默认.1),
                 最低温: 选项.最低温.unwrap_or(默认.2),
@@ -152,6 +191,9 @@ fn main() -> Result<(), 错误> {
             );
             if let Some(目录) = 输出 {
                 println!("结果目录：{}", 目录.display());
+                if !是基准 {
+                    后处理(&输入, &目录, 运行.预算)?;
+                }
             }
         }
     }

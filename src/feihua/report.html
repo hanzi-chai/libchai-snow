@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>冰雪飞花 · 看字与基本拆分</title>
+<style>
+:root{color-scheme:light;--ink:#26394a;--muted:#667789;--line:#dee5eb;--accent:#1559d4}
+*{box-sizing:border-box}:root [hidden]{display:none}
+body{margin:0;background:#f3f5f8;color:var(--ink);font:14px/1.5 system-ui,"PingFang SC",sans-serif}
+header,main{max-width:1600px;margin:auto;padding:14px 20px}
+header{display:flex;gap:8px 24px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+h1{font-size:21px;letter-spacing:.02em;margin:0}a{color:var(--accent)}
+button,input,select{font:inherit;color:var(--ink)}button,a,input,select{touch-action:manipulation}
+button{cursor:pointer}button:disabled{opacity:.4;cursor:default}
+.links{display:flex;gap:15px;font-size:12px}.summary{font-size:12px;color:var(--muted);margin-top:3px}
+.controls{position:sticky;top:0;z-index:2;background:#f3f5f8f5;border-block:1px solid var(--line);backdrop-filter:blur(8px)}
+.controls-inner{max-width:1600px;margin:auto;padding:10px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.tabs{display:flex;background:#e4eaf1;padding:3px;border-radius:8px}
+.tabs button{border:0;border-radius:6px;background:transparent;padding:6px 13px;color:var(--muted);white-space:nowrap}
+.tabs [aria-selected=true]{background:#fff;color:var(--ink);font-weight:650;box-shadow:0 1px 4px #26394a18}
+input[type=search]{width:240px;padding:7px 10px;border:1px solid #cad5df;border-radius:7px;background:white}
+select,.pager button{border:1px solid #cad5df;border-radius:6px;padding:5px 8px;background:white}
+label{display:flex;align-items:center;gap:5px}.count,.hint{font-size:12px;color:var(--muted)}
+.hint{max-width:1600px;margin:auto;padding:0 20px 7px}
+.grid{display:grid;gap:12px;align-items:start}
+.characters-grid{grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}
+.components-grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.card{background:white;border:1px solid var(--line);border-radius:10px;padding:13px;min-width:0}
+.card-head{display:flex;gap:7px;align-items:center}.card-head h2{font-size:19px;margin:0}
+.tag{font-size:10px;background:#edf2f6;padding:2px 5px;border-radius:4px;color:var(--muted)}
+.glyph-id{font:11px ui-monospace,monospace;color:var(--muted);margin-left:auto}
+.drawing{height:132px;display:flex;justify-content:center;align-items:center}
+.drawing svg{height:118px;width:118px}.drawing path{transition:stroke-width .12s}
+.drawing path.highlight{stroke-width:5.8}
+.code-row{padding:8px 0;border-top:1px solid var(--line)}
+.pronunciation{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.code{font:650 18px/1.4 ui-monospace,monospace;letter-spacing:.06em}
+.duplicate{color:#ad3143;background:#fff0f1;padding:2px 5px;border-radius:4px;font-size:11px}
+.elements{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.element{border-radius:5px;padding:2px 5px;background:#f5f7f9;display:flex;gap:4px;align-items:center;border-left:3px solid currentColor}
+.element svg{width:23px;height:23px}.element small{font-size:10px}
+.parts{display:flex;gap:5px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:7px;margin-top:4px;font-size:11px;align-items:center}
+.parts a{padding:2px 5px;background:#f1f4f7;border-radius:4px;text-decoration:none}.parts .positive{color:#c13e32}
+.component{padding:8px 10px;border-radius:7px}.component .card-head{height:21px;gap:5px}
+.component h2{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
+.component .glyph-id{font-size:10px}.word-link{border:0;background:none;padding:0;color:var(--ink);font:inherit;text-decoration:underline;text-decoration-color:#cad5df;text-underline-offset:3px}
+.component-body{display:grid;grid-template-columns:82px minmax(0,1fr);gap:9px;align-items:center;min-height:86px}
+.component .drawing{height:82px}.component .drawing svg{height:78px;width:78px}
+.basic-roots{display:flex;align-items:center;align-content:center;flex-wrap:wrap;gap:4px}
+.basic-root{display:inline-flex;align-items:center;gap:2px;border:1px solid #e4e9ef;background:#fcfdfe;border-radius:5px;padding:2px 4px;min-height:31px;text-decoration:none;color:var(--ink)}
+.component .basic-root svg{width:24px;height:24px}.root-number{font:650 10px ui-monospace,monospace;min-width:8px}
+.pager{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 0;font-size:12px;color:var(--muted)}
+.pager:first-child{padding-top:0}.pager:last-child{padding-bottom:0;padding-top:12px}
+.empty{background:white;border:1px solid var(--line);padding:30px;text-align:center;border-radius:8px;grid-column:1/-1}
+.stroke-symbol{font-size:24px;line-height:1.1;display:inline-flex;align-items:center;justify-content:center;min-width:24px}
+.view-label{font-size:12px;color:var(--muted)}
+@media(max-width:650px){header,main{padding:12px}.controls-inner{padding:8px 12px;gap:8px}.hint{padding:0 12px 6px}.characters-grid{grid-template-columns:1fr}.components-grid{grid-template-columns:repeat(auto-fill,minmax(215px,1fr))}input[type=search]{width:190px;max-width:100%}.links{gap:11px}h1{font-size:19px}}
+@media(max-width:460px){.components-grid{grid-template-columns:1fr}.component-body{grid-template-columns:72px 1fr;min-height:74px}.component .drawing,.component .drawing svg{height:70px;width:70px}.tabs button{padding:6px 10px}}
+</style>
+</head>
+<body>
+<header><div><h1>冰雪飞花 · 拆分取码</h1><div class="summary" id="summary"></div></div><div class="links"><a href="root-chart.png">字根图</a><a href="root-chart.pdf">PDF</a><a href="code.txt">码表</a><a href="feihua-beta.json">小鱼数据</a></div></header>
+<div class="controls"><div class="controls-inner">
+<div class="tabs" role="tablist" aria-label="查看内容"><button type="button" role="tab" id="characters-tab" aria-selected="true" aria-controls="view" data-mode="characters">看字</button><button type="button" role="tab" id="components-tab" aria-selected="false" aria-controls="view" data-mode="components">部件基本拆分</button></div>
+<input id="query" type="search" aria-label="搜索" placeholder="搜索字、字形 ID 或编码">
+<select id="kind" aria-label="字形类型"><option value="all">全部字</option><option value="部件">部件字</option><option value="复合体">复合体字</option></select>
+<label id="collision-control"><input id="collisions" type="checkbox">只看重码字</label>
+<label id="trivial-control" hidden title="隐藏完整基本拆分只有一个根的部件"><input id="hide-trivial" type="checkbox" checked>隐藏平凡拆分</label>
+<span class="count" id="count" aria-live="polite"></span>
+</div><p class="hint" id="hint"></p></div>
+<main id="view" role="tabpanel" aria-labelledby="characters-tab">
+<div class="pager"><button type="button" data-page="-1">上一页</button><span class="page"></span><button type="button" data-page="1">下一页</button></div>
+<div class="grid characters-grid" id="cards"></div>
+<div class="pager"><button type="button" data-page="-1">上一页</button><span class="page"></span><button type="button" data-page="1">下一页</button></div>
+</main>
+<script id="report-data" type="application/json">"{{data}}"</script>
+<script>
+const 数据=JSON.parse(document.getElementById('report-data').textContent);
+const 颜色="{{palette}}";
+const 拆分颜色=[颜色.component1,颜色.component2,颜色.component3,'#bc6100','#c13e32','#405365','#8a6800'];
+const 索引=new Map(数据.字形.map(项=>[项.id,项]));
+const 部件索引=new Map(数据.部件顺序.map(id=>[id,索引.get(id)]));
+const 转义=值=>String(值).replace(/[&<>"']/g,字=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[字]));
+const 笔画符号={'1':'⼀','2':'⼁','3':'⼃','4':'⼂','5':'乙','横':'⼀','竖':'⼁','撇':'⼃','点':'⼂','折':'乙'};
+function 图标(名,色){const 径=数据.字根图[名];return 径?`<svg viewBox="0 0 100 100" fill="none" stroke="${色}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" aria-label="${转义(名)}">${径.map(线=>`<path d="${转义(线)}"/>`).join('')}</svg>`:`<span class="stroke-symbol" style="color:${色}">${转义(笔画符号[名]||名)}</span>`;}
+function 名称(id){const 项=索引.get(id);return 项?(项.minimal[0]||项.名称||项.别名[0]||id):id;}
+function 图解(项,基本拆分){const 色表=new Map();if(基本拆分){for(const [i,根]of 项.完整拆分.entries())for(const 笔 of 根.笔画)色表.set(笔,拆分颜色[i%拆分颜色.length]);}else{for(const 根 of 项.roots)for(const 笔 of 根.strokes)色表.set(笔,颜色[根.colorRole]);}return `<div class="drawing"><svg viewBox="0 0 100 100" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-label="${转义(名称(项.id))}${基本拆分?'基本拆分图解':'取码图解'}">${项.paths.map((径,i)=>`<path data-stroke="${i}" d="${转义(径)}" stroke="${色表.get(i)||'#a4aab3'}"/>`).join('')}</svg></div>`;}
+function 根标签(根,i){const 色=拆分颜色[i%拆分颜色.length],id=根.名称.startsWith('字形-')?根.名称.slice(3):'',链接=部件索引.has(id);const 内容=`<span class="root-number" style="color:${色}">${i+1}</span>${图标(根.名称,色)}`;return `<${链接?`a href="#components/${id}"`:'span'} class="basic-root" data-strokes="${根.笔画.join(',')}" title="第${i+1}根 · ${转义(根.名称)} · 笔序 ${根.笔画.map(笔=>笔+1).join('、')}">${内容}</${链接?'a':'span'}>`;}
+function 部件卡片(项){const 名=转义(名称(项.id));return `<article class="card component" data-id="${项.id}"><div class="card-head"><h2 title="${名}">${项.minimal.length?`<button type="button" class="word-link" data-character="${项.id}" title="看这个字的取码">${名}</button>`:名}</h2><span class="glyph-id">${项.id}</span></div><div class="component-body">${图解(项,true)}<div class="basic-roots" aria-label="完整基本拆分">${项.完整拆分.map(根标签).join('')}</div></div></article>`;}
+function 字卡片(项){
+ const 状=状态.characters;
+ const 行集=项.行.filter(行=>(项.minimal.length?项.minimal.includes(行.字):true)&&(!状.重码||行.重码同组.length));
+ const 行=行集.map(行=>`<div class="code-row"><div class="pronunciation"><span>${转义([行.字,行.拼音].filter(Boolean).join(' · '))}</span><span class="code">${转义(行.编码)}</span>${行.重码同组.length?`<span class="duplicate">同码：${转义(行.重码同组.filter(字=>字!==行.字).join('、'))}</span>`:''}</div><div class="elements">${行.元素.map(素=>`<span class="element" style="color:${颜色[素.colorRole]||'#526077'}"><small>${转义(素.label)}</small>${素.colorRole==='initial'?转义(素.name):图标(素.name,颜色[素.colorRole]||'#526077')}<b>${转义(素.key)}</b></span>`).join('')}</div></div>`).join('');
+ const 分部=项.类别==='部件'?`<a href="#components/${项.id}">看基本拆分 →</a>`:项.分部.map(子=>`<a class="${子.正部?'positive':''}" href="#${部件索引.has(子.id)?'components':'characters'}/${子.id}" title="字形-${子.id}">${转义(名称(子.id))}${子.正部?' · 正部':''}</a>`).join('');
+ return `<article class="card character" data-id="${项.id}"><div class="card-head"><h2>${转义(名称(项.id))}</h2><span class="tag">${项.minimal.length?`${项.类别}字`:'分部取码'}</span><span class="glyph-id">${项.id}</span></div>${图解(项,false)}${行}<div class="parts"><span class="view-label">${项.类别==='部件'?'':'分部'}</span>${分部}</div></article>`;
+}
+const 查询=document.getElementById('query'),类型=document.getElementById('kind'),重码=document.getElementById('collisions'),隐藏平凡=document.getElementById('hide-trivial'),卡片区=document.getElementById('cards');
+const 状态={characters:{词:'',页:0,重码:false,类型:'all',定位:''},components:{词:'',页:0,隐藏平凡:true}};
+let 当前='characters';
+const 搜索=new Map(数据.字形.map(项=>[项.id,[项.id,项.名称,...项.别名,...项.完整拆分.map(根=>根.名称),...项.roots.map(根=>根.name),...项.行.map(行=>行.编码)].join(' ').toLowerCase()]));
+function 绘制(){
+ const 基本=当前==='components',状=状态[当前],词=状.词.trim().toLowerCase().replace(/^字形-/,'');
+ const 候选=基本?[...部件索引.values()]:数据.字形.filter(项=>项.minimal.length||项.id===状.定位);
+ const 结果=候选.filter(项=>(!基本||!状.隐藏平凡||项.完整拆分.length>1)&&(基本||状.类型==='all'||项.类别===状.类型)&&(基本||!状.重码||项.行.some(行=>项.minimal.includes(行.字)&&行.重码同组.length))&&(!词||搜索.get(项.id).includes(词)));
+ const 每页=基本?60:24,页数=Math.max(1,Math.ceil(结果.length/每页));
+ 状.页=Math.min(状.页,页数-1);
+ 查询.value=状.词;
+ 查询.placeholder=基本?'搜索部件、ID 或拆分字根':'搜索字、字形 ID 或编码';
+ 类型.hidden=基本;
+ document.getElementById('collision-control').hidden=基本;
+ document.getElementById('trivial-control').hidden=!基本;
+ 隐藏平凡.checked=状态.components.隐藏平凡;
+ 类型.value=状态.characters.类型;
+ 重码.checked=状态.characters.重码;
+ 卡片区.className=`grid ${基本?'components-grid':'characters-grid'}`;
+ 卡片区.innerHTML=结果.slice(状.页*每页,(状.页+1)*每页).map(基本?部件卡片:字卡片).join('')||`<div class="empty">没有符合条件的${基本?'部件':'字'}</div>`;
+ document.getElementById('count').textContent=`${结果.length} 个${基本?'部件':'字'}`;
+ document.getElementById('hint').textContent=基本?'按首笔顺序显示全部基本根；数字为根序号，悬停可高亮笔画。':'显示字的实际取码；重码按 minimal 字集去重的字—声母全码统计。';
+ document.getElementById('summary').textContent=基本?`${数据.统计.部件数} 个部件 · 完整基本拆分`:`${数据.统计.minimal字数} 个 minimal 字 · ${数据.指标.重码} 选重 · ${数据.统计.重码组数} 组重码`;
+ document.getElementById('view').setAttribute('aria-labelledby',`${当前}-tab`);
+ document.querySelectorAll('[data-mode]').forEach(钮=>{const 选中=钮.dataset.mode===当前;钮.setAttribute('aria-selected',String(选中));钮.tabIndex=选中?0:-1;});
+ document.querySelectorAll('.page').forEach(格=>{格.textContent=`${状.页+1} / ${页数}`;});
+ document.querySelectorAll('[data-page]').forEach(钮=>{钮.disabled=Number(钮.dataset.page)<0?状.页===0:状.页===页数-1;});
+}
+查询.addEventListener('input',()=>{状态[当前].词=查询.value;状态[当前].页=0;if(当前==='characters')状态.characters.定位='';绘制();});
+类型.addEventListener('change',()=>{状态.characters.类型=类型.value;状态.characters.页=0;绘制();});
+重码.addEventListener('change',()=>{状态.characters.重码=重码.checked;状态.characters.页=0;绘制();});
+隐藏平凡.addEventListener('change',()=>{状态.components.隐藏平凡=隐藏平凡.checked;状态.components.页=0;绘制();});
+document.querySelectorAll('[data-mode]').forEach(钮=>{
+ 钮.addEventListener('click',()=>{location.hash=钮.dataset.mode;});
+ 钮.addEventListener('keydown',事=>{if(!['ArrowLeft','ArrowRight'].includes(事.key))return;事.preventDefault();const 下个=当前==='characters'?'components':'characters';location.hash=下个;document.getElementById(`${下个}-tab`).focus();});
+});
+document.querySelectorAll('[data-page]').forEach(钮=>{钮.addEventListener('click',()=>{状态[当前].页+=Number(钮.dataset.page);绘制();document.querySelector('.controls').scrollIntoView({block:'start'});});});
+function 跳转(){
+ const 片段=decodeURIComponent(location.hash.slice(1)).split('/');
+ let 模式=片段[0],id=片段[1];
+ if(索引.has(模式)){id=模式;模式=部件索引.has(id)&&!索引.get(id).minimal.length?'components':'characters';}
+ if(!['characters','components'].includes(模式))return;
+ 当前=模式;
+ if(id&&索引.has(id)){
+  if(当前==='components'&&!部件索引.has(id))当前='characters';
+  状态[当前].词=id;状态[当前].页=0;
+  if(当前==='components'&&索引.get(id).完整拆分.length===1)状态.components.隐藏平凡=false;
+  if(当前==='characters'){状态.characters.定位=id;状态.characters.重码=false;状态.characters.类型='all';}
+ }
+ 绘制();
+}
+window.addEventListener('hashchange',跳转);
+卡片区.addEventListener('click',事=>{const 字钮=事.target.closest('[data-character]');if(字钮)location.hash=`characters/${字钮.dataset.character}`;});
+卡片区.addEventListener('mouseover',事=>{const 根=事.target.closest('[data-strokes]');if(!根)return;const 集=new Set(根.dataset.strokes.split(','));根.closest('.card').querySelectorAll('[data-stroke]').forEach(笔=>{笔.classList.toggle('highlight',集.has(笔.dataset.stroke));});});
+卡片区.addEventListener('mouseout',事=>{const 根=事.target.closest('[data-strokes]');if(根)根.closest('.card').querySelectorAll('.highlight').forEach(笔=>{笔.classList.remove('highlight');});});
+绘制();跳转();
+</script>
+</body>
+</html>

@@ -23,7 +23,7 @@ import {
 	默认退化配置,
 } from "hanzi-chai";
 import { dump } from "js-yaml";
-import 方案 from "./config.ts";
+import 方案, { 保留小集合, 生成声母归并 } from "./config.ts";
 
 const 小集合 = "aoeiuv;/";
 const 补集合 = "bpmfdtnlgkhjqxzcsryw,.";
@@ -42,8 +42,14 @@ export function 确保存在<T>(值: T | undefined | null, 说明: string): T {
 }
 
 type 安排 = string | { element: string };
-type 类别 = 1 | 2 | 3 | 4 | 5;
-type 根 = { 名称: string; 类别: 类别; 初始: 安排 | null; 空间: 安排[] };
+const 键域 = { 小集合, 补集合, 全集合 };
+type 根 = {
+	名称: string;
+	落键: keyof typeof 键域;
+	核心: boolean;
+	初始: 安排 | null;
+	空间: 安排[];
+};
 type 单元 = { type: string; strokes: number[] };
 type 请求 = { 字根: string } | { 部件: number };
 type 分部 = {
@@ -57,7 +63,7 @@ type 候选 = { 笔画: number[]; 字根: string[] };
 type 部件输入 = { id: number; 单元: 单元[]; 候选: 候选[]; 拆分: number[][] };
 type 字输入 = { 字: string; 字形: number; 声母: string[] };
 export type 飞花输入 = {
-	版本: 1;
+	版本: 2;
 	配置: 配置;
 	字根: 根[];
 	部件: 部件输入[];
@@ -118,66 +124,126 @@ function 检查空间(方案: 配置, 取字形: (id: number) => 字形) {
 		];
 		const 初始列表 = 展开安排(当前, 方案);
 		if (初始列表.length !== 1) throw Error(`当前安排不是单一决策：${名}`);
-		字根.set(名, { 名称: 名, 类别: 4, 初始: 初始列表[0], 空间: 唯一空间 });
+		const 笔画 = /^[1-5]$/.test(名);
+		const 复合体 = !笔画 && !是部件(取字形(Number.parseInt(名.slice(3), 16)));
+		if (复合体 && 保留小集合.has(名))
+			throw Error(`复合体不能保留在小集合：${名}`);
+		const 落键 = 复合体
+			? "补集合"
+			: 笔画 || 保留小集合.has(名)
+				? "小集合"
+				: "全集合";
+		字根.set(名, {
+			名称: 名,
+			落键,
+			核心: 笔画,
+			初始: 初始列表[0],
+			空间: 唯一空间.filter(
+				(项) => typeof 项 !== "string" || 键域[落键].includes(项),
+			),
+		});
 	}
-	const 已分 = new Set<string>();
-	function 分类(名: string, 路径 = new Set<string>()): 类别 {
-		const 根 = 确保存在(字根.get(名), `归并到未声明字根：${名}`);
-		if (已分.has(名)) return 根.类别;
-		if (路径.has(名)) throw Error(`空间归并成环：${[...路径, 名].join(" → ")}`);
-		const 下层 = new Set([...路径, 名]);
-		const 直接 = 根.空间.filter((项): 项 is string => typeof 项 === "string");
-		const 归并 = 根.空间.filter(
-			(项): 项 is { element: string } => typeof 项 !== "string",
-		);
-		const 声母 = 归并.filter((项) => 项.element.startsWith("声-"));
-		for (const { element } of 声母) {
-			const 键 = 键盘.mapping[element];
-			if (typeof 键 !== "string" || 键.length !== 1 || !补集合.includes(键))
-				throw Error(`声母锚点必须固定在补集合：${element}`);
-			if (键盘.mapping_space?.[element]?.length)
-				throw Error(`声母锚点不能移动：${element}`);
+	for (let 笔 = 1; 笔 <= 5; 笔++) {
+		const 根 = 确保存在(字根.get(String(笔)), `缺少基础笔画 ${笔}`);
+		if (根.空间.length !== 1 || typeof 根.空间[0] !== "string")
+			throw Error(`笔画必须固定在小集合：${笔}`);
+	}
+	for (const 根 of 字根.values()) {
+		for (const 项 of 根.空间) {
+			if (typeof 项 === "string") continue;
+			const 名 = 项.element;
+			if (名.startsWith("声-")) {
+				const 键 = 键盘.mapping[名];
+				if (typeof 键 !== "string" || 键.length !== 1 || !补集合.includes(键))
+					throw Error(`声母锚点必须固定在补集合：${名}`);
+				if (键盘.mapping_space?.[名]?.length)
+					throw Error(`声母锚点不能移动：${名}`);
+			} else if (!字根.has(名)) throw Error(`归并到未声明字根：${名}`);
 		}
-		const 目标 = 归并
-			.filter((项) => !项.element.startsWith("声-"))
-			.map((项) => 分类(项.element, 下层));
-		const 是全键集 = (键集: string) => 相同([...直接].sort(), [...键集].sort());
-		if (/^[1-5]$/.test(名)) {
-			if (直接.length !== 1 || 归并.length || !小集合.includes(直接[0]))
-				throw Error(`笔画必须固定在 B：${名}`);
-			根.类别 = 1;
-		} else if (
-			!声母.length &&
-			(!直接.length || 是全键集(小集合)) &&
-			目标.every((类) => 类 <= 2)
-		)
-			根.类别 = 2;
-		else if (
-			((!直接.length && !声母.length) ||
-				(是全键集(补集合) && 声母.length > 0)) &&
-			目标.every((类) => 类 === 3)
-		)
-			根.类别 = 3;
-		else if (
-			((!直接.length && !声母.length) ||
-				(是全键集(全集合) && 声母.length > 0)) &&
-			目标.every((类) => 类 >= 2 && 类 <= 4)
-		)
-			根.类别 = 4;
-		else throw Error(`字根空间不属于五类：${名}`);
-		if (
-			根.类别 !== 3 &&
-			!/^[1-5]$/.test(名) &&
-			!是部件(取字形(Number.parseInt(名.slice(3), 16)))
-		)
-			throw Error(`复合体不能进入 B：${名}`);
-		已分.add(名);
-		return 根.类别;
 	}
-	for (const 名 of 字根.keys()) 分类(名);
-	for (let 笔 = 1; 笔 <= 5; 笔++)
-		确保存在(字根.get(String(笔)), `缺少基础笔画 ${笔}`);
+	// 只有每一种安排都落在小集合时，才沿归并推断小集合身份。
+	let 新增 = true;
+	while (新增) {
+		新增 = false;
+		for (const 根 of 字根.values()) {
+			if (
+				根.落键 === "全集合" &&
+				根.空间.length > 0 &&
+				根.空间.every((项) =>
+					typeof 项 === "string"
+						? 小集合.includes(项)
+						: 字根.get(项.element)?.落键 === "小集合",
+				)
+			) {
+				根.落键 = "小集合";
+				新增 = true;
+			}
+		}
+	}
+	const 初始键 = new Map<string, string>();
+	const 解析中 = new Set<string>();
+	function 解析初始(根: 根): string {
+		const 已有 = 初始键.get(根.名称);
+		if (已有 !== undefined) return 已有;
+		if (解析中.has(根.名称))
+			throw Error(`初始归并成环：${[...解析中, 根.名称].join(" → ")}`);
+		const 安排 = 确保存在(根.初始, `缺少初始安排：${根.名称}`);
+		if (!根.空间.some((项) => 相同(项, 安排)))
+			throw Error(`初始安排超出允许键域：${根.名称}`);
+		解析中.add(根.名称);
+		const 键 =
+			typeof 安排 === "string"
+				? 安排
+				: 安排.element.startsWith("声-")
+					? 键盘.mapping[安排.element]
+					: 解析初始(
+							确保存在(
+								字根.get(安排.element),
+								`未声明归并目标：${安排.element}`,
+							),
+						);
+		if (typeof 键 !== "string" || !键域[根.落键].includes(键))
+			throw Error(`初始归并超出允许键域：${根.名称} → ${键}`);
+		解析中.delete(根.名称);
+		初始键.set(根.名称, 键);
+		return 键;
+	}
+	for (const 根 of 字根.values()) 解析初始(根);
 	return 字根;
+}
+
+function 选核心根(字根: Map<string, 根>, 部件表: 部件输入[]) {
+	const 核心 = new Set(
+		[...字根.values()]
+			.filter((根) => 根.落键 === "小集合")
+			.map((根) => 根.名称),
+	);
+	const 有拆分 = (件: 部件输入) =>
+		件.拆分.some((分法) =>
+			分法.every((i) => 件.候选[i].字根.some((名) => 核心.has(名))),
+		);
+	const 缺失 = 部件表.filter((件) => !有拆分(件));
+	if (缺失.length)
+		throw Error(
+			`核心根覆盖不足（${缺失.length} 个部件），未写出产物：\n${缺失.map((件) => 根名(件.id)).join("\n")}`,
+		);
+	const 相关部件 = new Map<string, 部件输入[]>();
+	for (const 件 of 部件表) {
+		const 相关根 = new Set(件.候选.flatMap((项) => 项.字根));
+		for (const 名 of 相关根) {
+			if (!核心.has(名)) continue;
+			const 列表 = 相关部件.get(名) ?? [];
+			列表.push(件);
+			相关部件.set(名, 列表);
+		}
+	}
+	// 按字形 ID 稳定地剔除可省略的根。其余小集合根仍然保留为准核心。
+	for (const 名 of [...核心].sort()) {
+		if (字根.get(名)?.核心) continue;
+		核心.delete(名);
+		if (相关部件.get(名)?.some((件) => !有拆分(件))) 核心.add(名);
+	}
+	for (const 名 of 核心) 确保存在(字根.get(名), 名).核心 = true;
 }
 
 function 读取单元(部件列表: 部件[]): Map<number, 单元[]> {
@@ -470,22 +536,55 @@ export function 准备飞花(): 飞花输入 {
 		}
 		return 值;
 	}
-	const 已配置认同 = new Map<string, string[]>();
+	const 同形根 = new Map<string, 根[]>();
 	for (const 根 of 字根.values()) {
 		if (/^[1-5]$/.test(根.名称)) continue;
 		const 形 = 取字形(Number.parseInt(根.名称.slice(3), 16));
 		if (!是部件(形)) continue;
 		const 键 = 签名(形);
-		const 列表 = 已配置认同.get(键) ?? [];
-		列表.push(根.名称);
-		已配置认同.set(键, 列表.sort());
+		const 列表 = 同形根.get(键) ?? [];
+		列表.push(根);
+		同形根.set(键, 列表);
+	}
+	const 已配置认同 = new Map<string, string>();
+	const 同形附形 = new Set<string>();
+	for (const [键, 列表] of 同形根) {
+		const 同形名称 = new Set(列表.map((根) => 根.名称));
+		const 主根 = 列表.filter(
+			({ 空间: [安排, ...其余] }) =>
+				其余.length > 0 ||
+				typeof 安排 === "string" ||
+				!同形名称.has(安排.element),
+		);
+		if (主根.length !== 1)
+			throw Error(
+				`同形部件字根必须固定归并到唯一主根：${[...同形名称].join("、")}；当前主根：${主根.map((根) => 根.名称).join("、")}`,
+			);
+		const 主根名称 = 主根[0].名称;
+		已配置认同.set(键, 主根名称);
+		for (const 根 of 列表) {
+			if (根.名称 !== 主根名称) 同形附形.add(根.名称);
+		}
+	}
+	const 词典 = 获取原始词典();
+	const 可声母归并 = new Set(
+		[...字根.values()]
+			.filter((根) => 根.落键 !== "小集合" && !同形附形.has(根.名称))
+			.map((根) => 根.名称),
+	);
+	for (const [名称, 安排列表] of 生成声母归并(字库, 词典, 可声母归并)) {
+		const 根 = 确保存在(字根.get(名称), `缺少字根：${名称}`);
+		for (const 安排 of 安排列表) {
+			if (!根.空间.some((项) => 相同(项, 安排))) 根.空间.push(安排);
+		}
 	}
 	function 查初始根(形: 字形): string | undefined {
-		if (字根.has(根名(形.id))) return 根名(形.id);
 		if (是部件(形)) {
 			if (形.笔画数() === 1) return String(分类器[形.笔画列表[0].feature]);
-			return 已配置认同.get(签名(形))?.[0];
+			return 已配置认同.get(签名(形));
 		}
+		const 名 = 根名(形.id);
+		return 字根.has(名) ? 名 : undefined;
 	}
 	const 字列表: 字输入[] = [];
 	const 部件集合 = new Map<number, 部件>();
@@ -570,33 +669,19 @@ export function 准备飞花(): 飞花输入 {
 	console.log(
 		`字根认同完成：${认同类.size} 类，备选保留 ${安全备选.size}，剔除 ${证明.危险.size}，证明 ${证明.分支数 + 复核.分支数} 条分支`,
 	);
+	const 取多笔根 = (签名: string) => 已配置认同.get(签名) ?? 安全备选.get(签名);
 	const 部件输入列表: 部件输入[] = [];
-	const 覆盖不足: string[] = [];
 	for (const { 件, 候选 } of 所有候选) {
 		const 可用候选: 候选[] = [];
 		for (const 项 of 候选) {
-			const 根列表 =
+			const 名 =
 				项.笔画.length === 1
-					? [String(分类器[件.笔画列表[项.笔画[0]].feature])]
-					: (已配置认同.get(项.签名) ??
-						(安全备选.has(项.签名)
-							? [确保存在(安全备选.get(项.签名), "备选缺失")]
-							: []));
-			if (根列表.length)
-				可用候选.push({ 笔画: 项.笔画.map((i) => i + 1), 字根: 根列表 });
+					? String(分类器[件.笔画列表[项.笔画[0]].feature])
+					: 取多笔根(项.签名);
+			if (名 !== undefined)
+				可用候选.push({ 笔画: 项.笔画.map((i) => i + 1), 字根: [名] });
 		}
 		const 拆分 = 合法拆分(件.笔画数(), 可用候选);
-		if (
-			!拆分.some((分法) =>
-				分法.every((i) =>
-					可用候选[i].字根.some((名) => {
-						const 类 = 字根.get(名)?.类别;
-						return 类 === 1 || 类 === 2;
-					}),
-				),
-			)
-		)
-			覆盖不足.push(`${根名(件.id)}（${件.笔画数()} 笔）`);
 		部件输入列表.push({
 			id: 件.id,
 			单元: 确保存在(单元记录.get(件.id), "缺少单元"),
@@ -604,18 +689,35 @@ export function 准备飞花(): 飞花输入 {
 			拆分,
 		});
 	}
-	if (覆盖不足.length)
-		throw Error(
-			`永久 B 覆盖不足（${覆盖不足.length} 个部件），未写出产物：\n${覆盖不足.join("\n")}`,
-		);
+	选核心根(字根, 部件输入列表);
 	const 生成配置 = structuredClone(方案);
 	const 表 = 确保存在(生成配置.form, "缺少 form");
 	表.mapping_space ??= {};
+	for (const 根 of 字根.values()) {
+		const 键 = 根.空间.filter((项): 项 is string => typeof 项 === "string");
+		const 范围 = 键域[根.落键];
+		const 安排: 广义安排[] =
+			键.length === 范围.length
+				? [[{ variable: 根.落键 }]]
+				: 键.filter((项) => 项 !== 根.初始);
+		安排.push(
+			...根.空间.filter((项) => typeof 项 !== "string" && !相同(项, 根.初始)),
+		);
+		if (安排.length)
+			表.mapping_space[根.名称] = 安排.map((value) => ({ value, score: 0 }));
+		else delete 表.mapping_space[根.名称];
+	}
 	生成配置.data ??= {};
 	生成配置.data.glyphs ??= [];
 	for (const [键, 名] of 安全备选) {
 		表.mapping_space[名] = [{ value: [{ variable: "小集合" }], score: 0 }];
-		字根.set(名, { 名称: 名, 类别: 5, 初始: null, 空间: [...小集合] });
+		字根.set(名, {
+			名称: 名,
+			落键: "小集合",
+			核心: false,
+			初始: null,
+			空间: [...小集合],
+		});
 		const 形 = 自定义.get(键);
 		if (形) 生成配置.data.glyphs.push(形);
 	}
@@ -624,7 +726,7 @@ export function 准备飞花(): 飞花输入 {
 		"缺少声母拼写运算",
 	);
 	const 字音 = new Map<string, Set<string>>();
-	for (const 条 of 获取原始词典()) {
+	for (const 条 of 词典) {
 		if ([...条.词].length !== 1 || 条.拼音.length !== 1) continue;
 		const 声 = 应用拼写运算(声规则, 条.拼音[0]);
 		const 键 = 表.mapping[`声-${声}`];
@@ -637,17 +739,14 @@ export function 准备飞花(): 飞花输入 {
 	for (const 字 of 字列表)
 		字.声母 = [...确保存在(字音.get(字.字), `字缺少读音：${字.字}`)].sort();
 	const 字根字 = 部件列表.flatMap((件) => {
-		const 根列表 =
+		const 名 =
 			件.笔画数() === 1
-				? [String(分类器[件.笔画列表[0].feature])]
-				: (已配置认同.get(签名(件)) ??
-					(安全备选.has(签名(件))
-						? [确保存在(安全备选.get(签名(件)), "备选缺失")]
-						: []));
-		return 根列表.length ? [{ 字形: 件.id, 字根: 根列表, 重复: 1 }] : [];
+				? String(分类器[件.笔画列表[0].feature])
+				: 取多笔根(签名(件));
+		return 名 === undefined ? [] : [{ 字形: 件.id, 字根: [名], 重复: 1 }];
 	});
 	const 输入: 飞花输入 = {
-		版本: 1,
+		版本: 2,
 		配置: 生成配置,
 		字根: [...字根.values()],
 		部件: 部件输入列表,
@@ -835,9 +934,10 @@ function row(x) {
 			rootSvg(x.名称) +
 			" <b>" +
 			x.名称 +
-			"</b><p>第 " +
-			x.类别 +
-			" 类；初始安排：" +
+			"</b><p>落键：" +
+			x.落键 +
+			(x.核心 ? " · 核心" : x.初始 === null ? " · 动态候选" : x.落键 === "小集合" ? " · 准核心" : "") +
+			"；初始安排：" +
 			(x.初始 === null ? "未启用" : escape(JSON.stringify(x.初始))) +
 			"</p><p>空间：" +
 			escape(JSON.stringify(x.空间)) +
