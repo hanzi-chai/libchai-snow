@@ -18,6 +18,7 @@ import {
 	应用拼写运算,
 	是部件,
 	type 模式,
+	type 笔画名称,
 	生成笔画路径,
 	获取原始词典,
 	获取字库,
@@ -26,10 +27,11 @@ import {
 	部件,
 } from "hanzi-chai";
 import { 确保存在, 笔形签名, type 飞花输入 } from "./prepare.ts";
-import { type 报告字形, 生成报告 } from "./report.ts";
+import { 生成基本拆分分页图 } from "./report-pdf.ts";
+import { type 报告, type 报告字形, 比较笔画顺序, 生成报告 } from "./report.ts";
 
 const 用法 =
-	"bun src/feihua/postprocess.ts --solution <solution.json> [--tree-data output/feihua/input.json] [--encoder target/release/feihua] [--inkscape inkscape] [--b-budget 50] [--complement-budget 30] [--budget-penalty 1]\n固定输出至 output/feihua-current/：feihua-beta.json、report.html、report.json、root-chart.svg/png/pdf 及当前解文件";
+	"bun src/feihua/postprocess.ts --solution <solution.json> [--tree-data output/feihua/input.json] [--encoder target/release/feihua] [--inkscape inkscape] [--b-budget 50] [--complement-budget 30] [--budget-penalty 1]\n固定输出至 output/feihua-current/：feihua-beta.json、report.html、report.json、root-chart.svg/png/pdf、component-splits.pdf 及当前解文件";
 if (process.argv.slice(2).includes("--help")) {
 	console.log(用法);
 	process.exit(0);
@@ -214,19 +216,28 @@ const 取形 = (id: number) =>
 			`缺少字形 ${id.toString(16)}`,
 		),
 	);
-const 键缓存 = new Map<string, string>();
-function 取键(名: string, 链 = new Set<string>()): string {
-	const 旧 = 键缓存.get(名);
+const 键序 = ["AOEIUV;/", "BPMFDTNL", "GKHWJQXY", "ZCSR,."];
+const 全键 = 键序.join("").toLowerCase();
+const 是根名 = (名称: string) => /^字形-[0-9a-f]{5}$|^[1-5]$/.test(名称);
+const 归并缓存 = new Map<string, { 名称: string; 键: string }>();
+function 取归并终点(名: string, 链 = new Set<string>()): { 名称: string; 键: string } {
+	const 旧 = 归并缓存.get(名);
 	if (旧 !== undefined) return 旧;
 	if (链.has(名)) throw Error(`归并成环：${名}`);
 	const 值 = 确保存在(配置.form?.mapping[名], `未启用字根 ${名}`);
-	let 键: string;
-	if (typeof 值 === "string" && 值.length === 1) 键 = 值;
-	else if (!Array.isArray(值) && typeof 值 === "object")
-		键 = 取键(值.element, new Set([...链, 名]));
-	else throw Error(`不支持的字根安排：${名}`);
-	键缓存.set(名, 键);
-	return 键;
+	let 终点: { 名称: string; 键: string };
+	if (typeof 值 === "string" && 值.length === 1 && 全键.includes(值)) {
+		终点 = { 名称: 名, 键: 值 };
+	} else if (!Array.isArray(值) && typeof 值 === "object") {
+		const 目标 = 取归并终点(值.element, new Set([...链, 名]));
+		// 声母锚点等非字根元素只提供键位。
+		终点 = 是根名(值.element) ? 目标 : { 名称: 名, 键: 目标.键 };
+	} else throw Error(`不支持的字根安排：${名}`);
+	归并缓存.set(名, 终点);
+	return 终点;
+}
+function 取键(名: string): string {
+	return 取归并终点(名).键;
 }
 const 部件表 = new Map<number, { 序号: number; 偏移: number }>();
 let 偏移 = 0;
@@ -561,7 +572,11 @@ if (
 )
 	throw Error("报告的重码统计与 Rust 不一致");
 const 报告字形表: 报告字形[] = [];
-const 部件排序键: { id: string; 笔画名称: string[] }[] = [];
+const 重码元素 = new Map<
+	string,
+	{ 成员: Map<string, string>; 位置: Set<string>[] }
+>();
+const 部件排序键: { id: string; 笔画名称: 笔画名称[] }[] = [];
 const 形名 = (id: number) => id.toString(16).padStart(5, "0");
 for (const id of [...目标字形].sort(
 	(甲, 乙) => Number(minimal.has(乙)) - Number(minimal.has(甲)) || 甲 - 乙,
@@ -594,6 +609,21 @@ for (const id of [...目标字形].sort(
 		});
 		for (const 行 of rows) {
 			const 编码 = 行.elements.map((项) => 项.key).join("");
+			const 同组 = 主字.includes(字) ? (重码表.get(编码) ?? []) : [];
+			if (同组.length) {
+				const 组 = 重码元素.get(编码) ?? {
+					成员: new Map<string, string>(),
+					位置: 行.elements.map(() => new Set<string>()),
+				};
+				组.成员.set(字, 形名(id));
+				for (const [位置, 项] of 行.elements.entries()) {
+					const 名 = 位置 === 0
+						? `声-${项.name === "零声母" ? "0" : 项.name}`
+						: 项.name.startsWith("字形-") ? 项.name : String(笔画名.indexOf(项.name) + 1);
+					组.位置[位置].add(取归并终点(名).名称);
+				}
+				重码元素.set(编码, 组);
+			}
 			报告行.push({
 				字,
 				拼音: 行.pinyin,
@@ -604,7 +634,7 @@ for (const id of [...目标字形].sort(
 					key,
 					colorRole,
 				})),
-				重码同组: 主字.includes(字) ? (重码表.get(编码) ?? []) : [],
+				重码同组: 同组,
 			});
 		}
 		if (主字.includes(字)) {
@@ -640,6 +670,9 @@ for (const id of [...目标字形].sort(
 		别名: 全别名,
 		minimal: 主字,
 		类别: 是部件字形 ? "部件" : "复合体",
+		笔顺: 是部件字形
+			? 结果.显示笔画.map((笔) => 分类器[笔.feature]).join("")
+			: undefined,
 		paths: 结果.paths,
 		roots: 结果.roots,
 		作为部件的形码: 结果.基础形码.map((项) => 项.key).join(""),
@@ -667,18 +700,8 @@ const 单笔图 = [0x00000, 0x00002, 0x00004, 0x00006, 0x00015].map((id, i) => {
 	if (笔画.length !== 1) throw Error(`代表笔画不是单笔：${形名(id)}`);
 	return [String(i + 1), 生成笔画路径(笔画)] as const;
 });
-const 部件顺序 = 部件排序键
-	.sort((甲, 乙) => {
-		const 笔数差 = 甲.笔画名称.length - 乙.笔画名称.length;
-		if (笔数差) return 笔数差;
-		for (const [位置, 笔] of 甲.笔画名称.entries()) {
-			const 对方 = 乙.笔画名称[位置];
-			if (笔 !== 对方) return 笔 < 对方 ? -1 : 1;
-		}
-		return 甲.id.localeCompare(乙.id);
-	})
-	.map(({ id }) => id);
-const 报告数据 = {
+const 部件顺序 = 部件排序键.sort(比较笔画顺序).map(({ id }) => id);
+const 报告数据: 报告 = {
 	版本: 1 as const,
 	来源: 当前快照路径,
 	指标,
@@ -692,6 +715,18 @@ const 报告数据 = {
 	字根图: Object.fromEntries([...根图, ...单笔图]),
 	部件顺序,
 	字形: 报告字形表,
+	重码组: [...重码表]
+		.sort(([甲码, 甲组], [乙码, 乙组]) =>
+			乙组.length - 甲组.length || (甲码 < 乙码 ? -1 : Number(甲码 > 乙码)),
+		)
+		.map(([编码, 同组]) => {
+			const { 成员, 位置 } = 确保存在(重码元素.get(编码), `报告缺少重码组：${编码}`);
+			return {
+				编码,
+				差异位置: 位置.flatMap((元素, i) => 元素.size > 1 ? [i + 1] : []),
+				成员: 同组.map((字) => ({ id: 确保存在(成员.get(字), `重码组缺字：${字} ${编码}`), 字 })),
+			};
+		}),
 };
 const 小鱼数据 = {
 	version: 2,
@@ -706,6 +741,8 @@ if (
 	字根产物.例外组数 !== 指标.补集合例外组数
 )
 	throw Error("字根图的组数与优化指标不一致");
+const 拆分页图 = resolve(编码目录, "component-splits");
+writeFileSync(`${拆分页图}.svg`, 生成基本拆分分页图(报告数据, 部件排序键));
 const 产物: Record<string, string | Buffer> = {
 	"input.json": 输入字节,
 	"solution.json": 快照字节,
@@ -715,6 +752,7 @@ const 产物: Record<string, string | Buffer> = {
 	"root-chart.svg": 字根产物.svg,
 	"root-chart.png": 字根产物.png,
 	"root-chart.pdf": 字根产物.pdf,
+	"component-splits.pdf": 转换SVG(拆分页图, "pdf"),
 };
 for (const 名 of ["config.yaml", "code.txt", "splits.json", "分析.json"])
 	产物[名] = readFileSync(resolve(编码目录, 名));
@@ -742,18 +780,34 @@ try {
 	rmSync(写入锁, { recursive: true, force: true });
 }
 console.log(
-	`后处理完成：${权威码.size} 个 minimal 字、${报告字形表.length} 个字形，全部 minimal 编码与 Rust 一致。\n${输出目录}/feihua-beta.json\n${输出目录}/report.html\n${输出目录}/root-chart.png`,
+	`后处理完成：${权威码.size} 个 minimal 字、${报告字形表.length} 个字形，全部 minimal 编码与 Rust 一致。\n${输出目录}/feihua-beta.json\n${输出目录}/report.html\n${输出目录}/root-chart.png\n${输出目录}/component-splits.pdf`,
 );
+
+function 转换SVG(前缀: string, 格式: "png" | "pdf"): Buffer {
+	const 转换 = spawnSync(
+		参数.get("--inkscape") ?? "inkscape",
+		[
+			`${前缀}.svg`,
+			"--export-area-page",
+			`--export-type=${格式}`,
+			格式 === "pdf" ? "--export-text-to-path" : "--export-width=2520",
+			`--export-filename=${前缀}.${格式}`,
+		],
+		{ encoding: "utf8" },
+	);
+	if (转换.error || 转换.status !== 0)
+		throw Error(
+			`SVG 已写入 ${前缀}.svg；${格式.toUpperCase()} 转换失败（退出码 ${转换.status}，信号 ${转换.signal}）。\n${转换.error?.message ?? 转换.stderr}`,
+		);
+	return readFileSync(`${前缀}.${格式}`);
+}
 
 function 生成字根图() {
 	const 方案 = 配置;
 	const 前缀 = resolve(编码目录, "root-chart");
 	const 映射 = 方案.form.mapping;
 
-	const 键序 = ["AOEIUV;/", "BPMFDTNL", "GKHWJQXY", "ZCSR,."];
-	const 全键 = 键序.join("").toLowerCase();
 	const 笔画 = ["⼀", "⼁", "⼃", "⼂", "乙"];
-	const 是根名 = (名称: string) => /^字形-[0-9a-f]{5}$|^[1-5]$/.test(名称);
 	const 配色 = {
 		B: { 字: "#7950a4", 底: "#faf7fd", 边: "#d7c7e7" },
 		A: { 字: "#3065a0", 底: "#f7faff", 边: "#c5d6ea" },
@@ -774,34 +828,9 @@ function 生成字根图() {
 				})[字] ?? 字,
 		);
 
-	// 以真实归并链的终点分组；同键的独立字根不会被合为一组。
-	const 终点缓存 = new Map<string, { 名称: string; 键: string }>();
-	function 取终点(
-		名称: string,
-		链 = new Set<string>(),
-	): { 名称: string; 键: string } {
-		const 缓存 = 终点缓存.get(名称);
-		if (缓存) return 缓存;
-		if (链.has(名称)) throw Error(`归并成环：${[...链, 名称].join(" → ")}`);
-		链.add(名称);
-		const 安排 = 映射[名称];
-		if (安排 == null) throw Error(`归并目标未启用或不存在：${名称}`);
-		let 结果: { 名称: string; 键: string };
-		if (typeof 安排 === "string") {
-			if (安排.length !== 1 || !全键.includes(安排))
-				throw Error(`字根必须安排在一个有效键上：${名称} = ${安排}`);
-			结果 = { 名称, 键: 安排 };
-		} else if (!Array.isArray(安排) && typeof 安排.element === "string") {
-			const 目标 = 取终点(安排.element, 链);
-			// 共享声母锚点不等于字根归并；与优化目标函数的组数口径一致。
-			结果 = { 名称: 是根名(安排.element) ? 目标.名称 : 名称, 键: 目标.键 };
-		} else throw Error(`不支持的字根安排：${名称}（需要单键或 element 归并）`);
-		终点缓存.set(名称, 结果);
-		return 结果;
-	}
 	const 键笔画 = new Map<string, string[]>();
 	for (const [位, 符号] of 笔画.entries()) {
-		const 键 = 取终点(String(位 + 1)).键;
+		const 键 = 取键(String(位 + 1));
 		const 符号组 = 键笔画.get(键) ?? [];
 		符号组.push(符号);
 		键笔画.set(键, 符号组);
@@ -821,7 +850,7 @@ function 生成字根图() {
 	const 分组 = new Map<string, 根组>();
 	for (const [名称, 安排] of Object.entries(映射)) {
 		if (安排 == null || !是根名(名称)) continue;
-		const 终点 = 取终点(名称);
+		const 终点 = 取归并终点(名称);
 		const 组 = 分组.get(终点.名称) ?? {
 			终点: 终点.名称,
 			键: 终点.键,
@@ -1067,27 +1096,10 @@ function 生成字根图() {
 <rect width="${宽}" height="${页高}" fill="#ffffff"/>
 <g font-family="PingFang SC, Noto Sans CJK SC, Source Han Sans SC, sans-serif" transform="translate(${平移横} ${平移纵}) scale(${缩放})">${片段.join("\n")}</g></svg>\n`;
 	writeFileSync(`${前缀}.svg`, SVG);
-	for (const 格式 of ["png", "pdf"]) {
-		const 转换 = spawnSync(
-			参数.get("--inkscape") ?? "inkscape",
-			[
-				`${前缀}.svg`,
-				"--export-area-page",
-				`--export-type=${格式}`,
-				格式 === "pdf" ? "--export-text-to-path" : "--export-width=2520",
-				`--export-filename=${前缀}.${格式}`,
-			],
-			{ encoding: "utf8" },
-		);
-		if (转换.error || 转换.status !== 0)
-			throw Error(
-				`SVG 已写入 ${前缀}.svg；${格式.toUpperCase()} 转换失败（退出码 ${转换.status}，信号 ${转换.signal}）。\n${转换.error?.message ?? 转换.stderr}`,
-			);
-	}
 	return {
 		svg: SVG,
-		png: readFileSync(`${前缀}.png`),
-		pdf: readFileSync(`${前缀}.pdf`),
+		png: 转换SVG(前缀, "png"),
+		pdf: 转换SVG(前缀, "pdf"),
 		基本组数: [...分组.values()].filter((组) =>
 			键序[0].toLowerCase().includes(组.键),
 		).length,

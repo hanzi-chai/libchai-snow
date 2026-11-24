@@ -1,5 +1,7 @@
 //! 飞花专用增量编码与并行退火。预处理证明结构不变，热循环只处理整数索引。
+mod consistency;
 use chai::config::{安排 as 配置安排, 广义码位, 求解器配置, 配置};
+use consistency::冲突索引;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
@@ -38,6 +40,8 @@ fn 是小集合(键: u8) -> bool {
 #[derive(Deserialize)]
 struct 输入 {
     版本: u32,
+    初始拆分: Vec<usize>,
+    局部约束: Option<Vec<Vec<Vec<usize>>>>,
     配置: Value,
     字根: Vec<输入根>,
     部件: Vec<输入部件>,
@@ -48,8 +52,7 @@ struct 输入 {
 #[derive(Deserialize)]
 struct 输入根 {
     名称: String,
-    类别: Option<u8>,
-    落键: Option<键域>,
+    落键: 键域,
     #[serde(default)]
     核心: bool,
     初始: Option<配置安排>,
@@ -205,11 +208,7 @@ impl 键位解析器 {
     }
 
     fn 解析(
-        &mut self,
-        根列表: &[根],
-        安排: &[usize],
-        待根: &[usize],
-        键位: &mut [u8],
+        &mut self, 根列表: &[根], 安排: &[usize], 待根: &[usize], 键位: &mut [u8],
         变化: &mut Vec<(usize, u8)>,
     ) -> Result<(), usize> {
         for &r in 待根 {
@@ -353,6 +352,7 @@ pub struct 上下文 {
     原配置: Value,
     pub 配置: 配置,
     输入校验: u64,
+    冲突: 冲突索引,
     根: Vec<根>,
     声母锚点: Vec<String>,
     归并: 归并索引,
@@ -364,7 +364,6 @@ pub struct 上下文 {
     部件字: Vec<Vec<usize>>,
     部件整字: Vec<Vec<usize>>,
     可换拆分: Vec<usize>,
-    可换根: Vec<usize>,
     可重复: Vec<usize>,
     备选: Vec<usize>,
     初始: 决策,
@@ -377,7 +376,17 @@ impl 上下文 {
             (哈希 ^ 字节 as u64).wrapping_mul(0x100000001b3)
         });
         let 输入: 输入 = serde_json::from_slice(&字节)?;
-        检查(matches!(输入.版本, 1 | 2), "不支持的飞花输入版本")?;
+        检查(
+            输入.版本 == 3,
+            "局部一致性需要版本 3 输入，请重新运行 prepare.ts",
+        )?;
+        let 冲突 = 冲突索引::新建(
+            输入.部件.iter().map(|件| 件.拆分.len()),
+            输入
+                .局部约束
+                .as_deref()
+                .ok_or_else(|| 报错("缺少局部约束"))?,
+        )?;
         // 使用 libchai 配置结构读取；另保留原始值，防止旧结构丢弃 fusion/glyphs 等字段。
         let 配置: 配置 = serde_json::from_value(输入.配置.clone())?;
         let mut 字母表 = 配置.form.alphabet.as_bytes().to_vec();
@@ -427,8 +436,7 @@ impl 上下文 {
                     };
                     let 键 = 键号(键)?;
                     检查(!是小集合(键), "声母锚点不能位于 B")?;
-                    let 锚点 = (输入.版本 == 2)
-                        .then(|| 声母锚点.binary_search(element).expect("已声明的声母锚点"));
+                    let 锚点 = Some(声母锚点.binary_search(element).expect("已声明的声母锚点"));
                     Ok(vec![布局::声(键, 锚点)])
                 }
                 配置安排::Grouped { element } => Ok(vec![布局::归并(取根(element)?)]),
@@ -458,18 +466,7 @@ impl 上下文 {
         let mut 根列表 = Vec::new();
         let mut 初始安排 = Vec::new();
         for 根 in &输入.字根 {
-            let (落键, 核心, 备选) = if 输入.版本 == 1 {
-                match 根.类别 {
-                    Some(1 | 2) => (键域::小集合, true, false),
-                    Some(3) => (键域::补集合, false, false),
-                    Some(4) => (键域::全集合, false, false),
-                    Some(5) => (键域::小集合, false, true),
-                    _ => return Err(报错("无效旧版字根类别")),
-                }
-            } else {
-                let 落键 = 根.落键.ok_or_else(|| 报错("缺少字根键域"))?;
-                (落键, 根.核心, 根.初始.is_none())
-            };
+            let (落键, 核心, 备选) = (根.落键, 根.核心, 根.初始.is_none());
             检查(
                 !(核心 || 备选) || 落键 == 键域::小集合,
                 "核心根和动态候选必须位于小集合",
@@ -580,7 +577,10 @@ impl 上下文 {
             let mut 掩码列表 = Vec::new();
             let mut 全掩码 = 0u32;
             for 项 in &件.候选 {
-                检查(!项.笔画.is_empty() && !项.字根.is_empty(), "空字根候选")?;
+                检查(
+                    !项.笔画.is_empty() && 项.字根.len() == 1,
+                    "版本 3 候选必须有笔画且恰有一个实际字根",
+                )?;
                 检查(
                     项.笔画.windows(2).all(|对| 对[0] < 对[1]),
                     "候选笔序未排序或重复",
@@ -729,16 +729,6 @@ impl 上下文 {
             .enumerate()
             .filter_map(|(i, 件)| (件.拆分.len() > 1).then_some(i))
             .collect();
-        let 可换根 = 部件列表
-            .iter()
-            .enumerate()
-            .filter_map(|(i, 件)| {
-                件.候选
-                    .clone()
-                    .any(|j| 候选列表[j].根.len() > 1)
-                    .then_some(i)
-            })
-            .collect();
         let 备选 = 根列表
             .iter()
             .enumerate()
@@ -746,7 +736,7 @@ impl 上下文 {
             .collect();
         let 初始 = 决策 {
             安排: 初始安排,
-            拆分: vec![0; 部件列表.len()],
+            拆分: 输入.初始拆分,
             选根: vec![无根; 候选列表.len()],
             重复,
         };
@@ -754,6 +744,7 @@ impl 上下文 {
             原配置: 输入.配置,
             配置,
             输入校验,
+            冲突,
             根: 根列表,
             声母锚点,
             归并,
@@ -765,7 +756,6 @@ impl 上下文 {
             部件字,
             部件整字,
             可换拆分,
-            可换根,
             可重复,
             备选,
             初始,
@@ -888,10 +878,7 @@ impl 上下文 {
         Ok(())
     }
     pub fn 并行退火(
-        &self,
-        参数: &退火参数,
-        初始: &决策,
-        输出: Option<&Path>,
+        &self, 参数: &退火参数, 初始: &决策, 输出: Option<&Path>,
     ) -> 结果<Vec<优化结果>> {
         检查(
             参数.线程 > 0 && 参数.步数 > 0 && 参数.报告间隔 > 0,
@@ -929,11 +916,7 @@ impl 上下文 {
         Ok(结果)
     }
     fn 退火(
-        &self,
-        参数: &退火参数,
-        决策: 决策,
-        线程序号: usize,
-        输出: Option<&Path>,
+        &self, 参数: &退火参数, 决策: 决策, 线程序号: usize, 输出: Option<&Path>,
     ) -> 结果<优化结果> {
         let mut 状态 = 状态::新建(self, 决策, true)?;
         let mut 最优指标 = 状态.指标(参数.预算);
@@ -1076,13 +1059,49 @@ impl 上下文 {
                     }
                 }
             }
-            54..=75 if !self.可换拆分.is_empty() => {
+            操作 @ 54..=75 if !self.可换拆分.is_empty() => {
                 let 件 = self.可换拆分[随机.范围(self.可换拆分.len())];
                 let 新 = self.最短拆分(状态, 件, 随机, false).expect("永久 B 覆盖");
                 if 新 != 状态.决策.拆分[件] {
                     工作.拆分.push((件, 状态.决策.拆分[件]));
                     状态.决策.拆分[件] = 新;
                     工作.标部件(件, false);
+                    if 操作 >= 70 {
+                        let 号 = self.冲突.起点[件] + 新;
+                        for &(块, 掩码) in &self.冲突.掩码[号] {
+                            let mut 冲突位 = 状态.已选[块] & 掩码;
+                            while 冲突位 != 0 {
+                                let 邻件 =
+                                    self.冲突.所属[块 * 64 + 冲突位.trailing_zeros() as usize];
+                                冲突位 &= 冲突位 - 1;
+                                let 旧 = 状态.决策.拆分[邻件];
+                                let 长 = self.部件[邻件].拆分[旧].len();
+                                let mut 数 = 0;
+                                let mut 选择 = 旧;
+                                for (i, 分) in self.部件[邻件]
+                                    .拆分
+                                    .iter()
+                                    .enumerate()
+                                    .take_while(|(_, 分)| 分.len() <= 长)
+                                {
+                                    if 分.len() == 长
+                                        && 分.iter().all(|&候选| 状态.决策.选根[候选] != 无根)
+                                        && !self.冲突.互斥(号, self.冲突.起点[邻件] + i)
+                                    {
+                                        数 += 1;
+                                        if 随机.范围(数) == 0 {
+                                            选择 = i
+                                        }
+                                    }
+                                }
+                                if 选择 != 旧 {
+                                    工作.拆分.push((邻件, 旧));
+                                    状态.决策.拆分[邻件] = 选择;
+                                    工作.标部件(邻件, false);
+                                }
+                            }
+                        }
+                    }
                 }
             }
             76..=83 if !self.可重复.is_empty() => {
@@ -1093,18 +1112,6 @@ impl 上下文 {
                         工作.重复.push((件, 状态.决策.重复[件]));
                         状态.决策.重复[件] = 新;
                     }
-                }
-            }
-            84..=91 if !self.可换根.is_empty() => {
-                let 件 = self.可换根[随机.范围(self.可换根.len())];
-                let 分法 = &self.部件[件].拆分[状态.决策.拆分[件]];
-                let 候选 = 分法[随机.范围(分法.len())];
-                let 根 = &self.候选[候选].根;
-                let 新 = 根[随机.范围(根.len())];
-                if 是小集合(状态.键[新]) && 新 != 状态.决策.选根[候选] {
-                    工作.选根.push((候选, 状态.决策.选根[候选]));
-                    状态.决策.选根[候选] = 新;
-                    工作.标部件(件, false);
                 }
             }
             92..=97 if !self.备选.is_empty() => {
@@ -1252,6 +1259,20 @@ impl 上下文 {
                 }
             }
         }
+        for &(件, 旧) in &工作.拆分 {
+            let 起点 = self.冲突.起点[件];
+            for 号 in [起点 + 旧, 起点 + 状态.决策.拆分[件]] {
+                状态.已选[号 / 64] ^= 1 << (号 % 64);
+                工作.翻转.push(号);
+            }
+        }
+        if 工作.拆分.iter().any(|&(件, _)| {
+            !self
+                .冲突
+                .相容(self.冲突.起点[件] + 状态.决策.拆分[件], &状态.已选)
+        }) {
+            return false;
+        }
         for i in 0..工作.重复.len() {
             let (件, _) = 工作.重复[i];
             if 状态.部件码[件][1] == 0 {
@@ -1274,6 +1295,7 @@ impl 上下文 {
 struct 状态 {
     决策: 决策,
     键: Vec<u8>,
+    已选: Vec<u64>,
     部件码: Vec<[u8; 3]>,
     码: Vec<u32>,
     计数: Vec<u32>,
@@ -1292,6 +1314,7 @@ impl 状态 {
         )?;
         let mut 状态 = Self {
             决策,
+            已选: 模型.冲突.空集(),
             键: vec![0; 模型.根.len()],
             部件码: vec![[0; 3]; 模型.部件.len()],
             码: Vec::new(),
@@ -1346,9 +1369,6 @@ impl 状态 {
                 .iter()
                 .position(|分法| 分法.iter().all(|&i| 状态.决策.选根[i] != 无根))
                 .ok_or_else(|| 报错("没有可行拆分"))?;
-            if !严格 {
-                状态.决策.拆分[件] = 最短;
-            }
             let 分法 = 数据
                 .拆分
                 .get(状态.决策.拆分[件])
@@ -1359,6 +1379,24 @@ impl 状态 {
                 "所选拆分不可行或不是最少根拆分",
             )?;
             检查((1..=3).contains(&状态.决策.重复[件]), "重复次数必须为 1–3")?;
+        }
+        for (件, &分) in 状态.决策.拆分.iter().enumerate() {
+            let 号 = 模型.冲突.起点[件] + 分;
+            if !模型.冲突.相容(号, &状态.已选) {
+                let 邻 = 模型.冲突.掩码[号]
+                    .iter()
+                    .find_map(|&(块, 位)| {
+                        let 重叠 = 位 & 状态.已选[块];
+                        (重叠 != 0)
+                            .then(|| 模型.冲突.所属[块 * 64 + 重叠.trailing_zeros() as usize])
+                    })
+                    .expect("存在冲突");
+                return Err(报错(format!(
+                    "部件 {:05x} 与 {:05x} 的连续局部拆分冲突",
+                    模型.部件[邻].id, 模型.部件[件].id
+                )));
+            }
+            状态.已选[号 / 64] |= 1 << (号 % 64);
             状态.部件码[件] = 状态.部件编码(模型, 件);
         }
         for i in 0..模型.字.len() {
@@ -1419,7 +1457,8 @@ impl 状态 {
     fn 核验(&self, 模型: &上下文) -> 结果<()> {
         let 全量 = Self::新建(模型, self.决策.clone(), true)?;
         检查(
-            self.键 == 全量.键
+            self.已选 == 全量.已选
+                && self.键 == 全量.键
                 && self.部件码 == 全量.部件码
                 && self.码 == 全量.码
                 && self.计数 == 全量.计数
@@ -1432,6 +1471,7 @@ impl 状态 {
 }
 
 struct 工作区 {
+    翻转: Vec<usize>,
     安排: Vec<(usize, usize)>,
     拆分: Vec<(usize, usize)>,
     选根: Vec<(usize, usize)>,
@@ -1452,6 +1492,7 @@ struct 工作区 {
 impl 工作区 {
     fn 新建(模型: &上下文) -> Self {
         Self {
+            翻转: Vec::new(),
             安排: Vec::new(),
             拆分: Vec::new(),
             选根: Vec::new(),
@@ -1471,6 +1512,7 @@ impl 工作区 {
         }
     }
     fn 清空(&mut self) {
+        self.翻转.clear();
         self.安排.clear();
         self.拆分.clear();
         self.选根.clear();
@@ -1519,6 +1561,9 @@ impl 工作区 {
         }
     }
     fn 回退(&self, 状态: &mut 状态) {
+        for &号 in &self.翻转 {
+            状态.已选[号 / 64] ^= 1 << (号 % 64);
+        }
         for &(i, 码) in self.编码.iter().rev() {
             状态.换码(i, 码);
         }
@@ -1619,6 +1664,7 @@ mod tests {
             原配置: Value::Null,
             配置: 配置::default(),
             输入校验: 0,
+            冲突: 冲突索引::新建([2, 1].into_iter(), &[]).unwrap(),
             根,
             声母锚点: vec![],
             归并,
@@ -1665,7 +1711,6 @@ mod tests {
             部件字: vec![vec![0], vec![1, 2]],
             部件整字: vec![vec![0], vec![2]],
             可换拆分: vec![0],
-            可换根: vec![0],
             可重复: vec![0, 1],
             备选: vec![3],
             初始: 决策 {

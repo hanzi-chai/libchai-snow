@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞花分部、字根与拆分核查</title>
+<style>
+:root {
+	color-scheme: light;
+	--ink: #192e36;
+	--muted: #52676e;
+	--line: #dbe4e5;
+	--surface: #fff;
+	--ground: #f3f6f6;
+	--accent: #146c63;
+	--selected: #e5f3ef;
+	font: 15px/1.55 system-ui, "PingFang SC", sans-serif;
+	scrollbar-gutter: stable;
+}
+* { box-sizing: border-box; }
+body {
+	--gutter: clamp(.85rem, 2vw, 2.75rem);
+	margin: 0; background: var(--ground); color: var(--ink);
+}
+h1, h2, h3, h4, p, figure, dl, dd { margin: 0; }
+h1 { font-size: clamp(1.3rem, 2vw, 1.85rem); line-height: 1.25; }
+h2 { font-size: 1.1rem; }
+h3 { font-size: 1rem; }
+h4 { font-size: .83rem; color: var(--muted); }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .46; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: .86em ui-monospace, monospace; }
+.page-header {
+	padding: 1.15rem var(--gutter);
+	background: #172f36;
+	color: #f6fbfa;
+}
+.toolbar {
+	position: sticky; top: 0; z-index: 1;
+	display: flex; align-items: center; justify-content: space-between;
+	gap: .75rem 1.5rem; flex-wrap: wrap;
+	padding: .65rem var(--gutter); background: var(--surface);
+	border-bottom: 1px solid var(--line);
+}
+.modes { display: flex; flex-wrap: wrap; gap: .25rem; }
+.mode {
+	border: 1px solid transparent; background: var(--surface);
+	padding: .4rem .75rem; border-radius: .45rem;
+}
+.mode:hover { background: var(--ground); }
+.mode[aria-pressed="true"] { background: var(--selected); color: #0b514a; font-weight: 650; }
+#query {
+	width: min(100%, 24rem); min-width: 0; padding: .45rem .7rem;
+	border: 1px solid #bacacc; border-radius: .45rem; background: var(--surface);
+}
+.root-filters:not([hidden]) {
+	display: flex; flex-wrap: wrap; align-items: end; gap: .4rem .8rem; width: 100%;
+}
+.root-filters label {
+	display: grid; gap: .2rem; color: var(--muted); font-size: .82rem;
+}
+.root-filters select, .root-filters button {
+	border: 1px solid #bacacc; border-radius: .4rem; background: var(--surface);
+	color: var(--ink); padding: .3rem .5rem;
+}
+.workspace { padding: .8rem var(--gutter) 1.5rem; }
+#count, .muted { color: var(--muted); font-size: .84rem; }
+#count { margin-bottom: .65rem; }
+.waterfall { position: relative; }
+#rows {
+	position: relative;
+	display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+	gap: clamp(.65rem, 1vw, 1.1rem);
+}
+#rows[data-layout="字根"], #rows[data-layout="危险"] {
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+}
+#more { position: absolute; bottom: 0; left: 0; width: 1px; min-height: 1px; pointer-events: none; }
+.card {
+	min-width: 0; background: var(--surface); overflow-wrap: anywhere;
+	border: 1px solid var(--line); border-radius: .65rem;
+}
+#rows:not([data-layout="字根"]) > .card {
+	position: absolute; top: 0; left: 0; width: var(--card-width);
+}
+.card-head {
+	display: flex; align-items: center; gap: .8rem; padding: .75rem .9rem;
+	border-bottom: 1px solid var(--line);
+}
+.card-head code { color: var(--muted); }
+.card-body { padding: .75rem .9rem; }
+.glyph {
+	display: inline-grid; place-items: center; flex: none; width: 3rem; height: 3rem;
+	background: #f2f7f6; border-radius: .4rem; font-weight: 600;
+}
+.glyph svg { display: block; width: 86%; height: 86%; }
+.glyph path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; }
+.glyph-large {
+	width: 4.25rem; height: auto; aspect-ratio: 1;
+	font-size: 1.45rem; border: 1px solid var(--line);
+	background-image: linear-gradient(transparent 49.5%, var(--line) 50%, transparent 50.5%),
+		linear-gradient(90deg, transparent 49.5%, var(--line) 50%, transparent 50.5%);
+}
+.figure-list, .chips { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.figure-list figure { display: grid; justify-items: center; gap: .25rem; }
+.figure-list figcaption { font-size: .8rem; color: var(--muted); text-align: center; }
+.chip {
+	display: inline-flex; align-items: baseline; gap: .3rem;
+	padding: .15rem .45rem; border-radius: .35rem; border: 1px solid var(--line);
+	background: #f8faf9; overflow-wrap: anywhere;
+}
+.dot { width: .6rem; height: .6rem; border-radius: 50%; flex: none; }
+.facts { display: grid; gap: .75rem; }
+.facts > div { display: grid; gap: .35rem; }
+.facts dt { font-size: .85rem; color: var(--muted); }
+.compare, .parts {
+	display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem;
+}
+.compare { margin-top: .75rem; grid-template-columns: minmax(0, 1fr); gap: .65rem; }
+.compare section, .parts section { border: 1px solid var(--line); border-radius: .55rem; min-width: 0; }
+.compare h3, .parts h3 { padding: .65rem .8rem; border-bottom: 1px solid var(--line); }
+.compare h3 span { margin-left: .4rem; font-size: .8rem; font-weight: 400; color: var(--muted); }
+.choices { list-style: none; margin: 0; padding: 0; }
+.choices li { padding: .5rem .7rem; overflow-wrap: anywhere; }
+.choices li { border-bottom: 1px solid var(--line); }
+.candidate { display: flex; gap: .6rem; align-items: center; }
+.candidate > div { display: grid; gap: .2rem; }
+.candidate-ref { color: var(--accent); font-weight: 650; }
+.split { display: flex; align-items: baseline; gap: .4rem; flex-wrap: wrap; }
+.split .chip { font-size: .84rem; }
+.parts section > div { display: grid; gap: .45rem; padding: .75rem; }
+.parts h4:not(:first-child) { margin-top: .4rem; }
+.empty { padding: 1rem; color: var(--muted); grid-column: 1 / -1; }
+@media (max-width: 650px) {
+	.toolbar { gap: .4rem; }
+	.mode { font-size: .85rem; padding: .35rem .45rem; }
+	.parts { gap: .55rem; }
+}
+</style>
+</head>
+<body>
+<header class="page-header"><h1>飞花分部、字根与拆分核查</h1></header>
+<div class="toolbar">
+	<nav class="modes" aria-label="核查内容">
+		<button class="mode" type="button" data-mode="部件" aria-pressed="true">部件与合法拆分</button>
+		<button class="mode" type="button" data-mode="复合体" aria-pressed="false">冻结分部</button>
+		<button class="mode" type="button" data-mode="字根" aria-pressed="false">字根与决策空间</button>
+		<button class="mode" type="button" data-mode="危险" aria-pressed="false">剔除备选</button>
+	</nav>
+	<input id="query" type="search" aria-label="搜索当前分类" placeholder="搜索汉字、字形 ID 或字根">
+	<form class="root-filters" id="root-filters" aria-label="字根筛选" hidden>
+		<label>落键范围
+			<select name="落键">
+				<option value="">不限</option>
+				<option>小集合</option><option>补集合</option><option>全集合</option>
+			</select>
+		</label>
+		<label>直落覆盖
+			<select name="覆盖">
+				<option value="">不限</option>
+				<option value="小集合">含完整小集合</option>
+				<option value="补集合">含完整补集合</option>
+				<option value="全集合">含完整全集合</option>
+				<option value="部分">仅部分键位</option>
+				<option value="无">无直落键位</option>
+			</select>
+		</label>
+		<label>直落键位
+			<select name="键位" id="direct-key"><option value="">不限</option></select>
+		</label>
+		<label>归并选项
+			<select name="归并">
+				<option value="">不限</option>
+				<option value="声母">有声母归并</option>
+				<option value="字根">有字根归并</option>
+				<option value="无">无归并</option>
+			</select>
+		</label>
+		<label>字根类型
+			<select name="类别">
+				<option value="">不限</option>
+				<option>核心</option><option>准核心</option><option>动态候选</option><option>其他</option>
+			</select>
+		</label>
+		<button type="button" id="reset-root-filters">清除筛选</button>
+	</form>
+</div>
+<main class="workspace">
+	<p id="count" aria-live="polite"></p>
+	<div class="waterfall">
+		<div id="rows"></div>
+		<div id="more" aria-hidden="true"></div>
+	</div>
+</main>
+<script id="report-data" type="application/json">"{{data}}"</script>
+<script>
+const 数据 = JSON.parse(document.getElementById("report-data").textContent);
+const 图形 = new Map(数据.图形.map((项) => [项.id, 项.路径]));
+const 字名 = new Map();
+for (const 项 of 数据.字) {
+	if (!字名.has(项.字形)) 字名.set(项.字形, new Set());
+	字名.get(项.字形).add(项.字);
+}
+
+const 色表 = ["#a12440", "#1b64a4", "#227257", "#985400", "#7145a0", "#006f81"];
+const 笔名 = ["横", "竖", "撇", "点", "折"];
+const 每批 = 40;
+const 取 = (id) => document.getElementById(id);
+const 查询 = 取("query"), 列表 = 取("rows");
+const 筛选表 = 取("root-filters");
+for (const 键 of 数据.键域.全集合) 取("direct-key").add(new Option(键, 键));
+const 选项 = [...document.querySelectorAll("[data-mode]")];
+const 字形名 = (id) => `字形-${id.toString(16).padStart(5, "0")}`;
+const 别名 = (id) => [...(字名.get(id) || [])].join("、");
+const 转义 = (值) => String(值).replace(/[&<>"']/g, (字) =>
+	({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[字]);
+const 单元色 = (序) => 色表[序 % 色表.length];
+const 笔序 = (序列) => `第 ${序列.join("、")} 笔`;
+const 标签 = (值) => `<span class="chip">${转义(值)}</span>`;
+let 模式 = "部件";
+let 结果 = [];
+let 已展示 = 0;
+
+function 字图(id, { 大图 = false, 单元 = [], 淡化 = false, 文本 = "" } = {}) {
+	const 路径 = 图形.get(id) || [];
+	const 笔色 = new Map();
+	for (const [序, 项] of 单元.entries()) {
+		for (const 笔 of 项.strokes) {
+			if (!笔色.has(笔)) 笔色.set(笔, 单元色(序));
+		}
+	}
+	const 内容 = 路径.length
+		? `<svg viewBox="0 0 100 100">${路径.map((径, 序) =>
+			'<path stroke="' + (笔色.get(序 + 1) || (淡化 ? "#a8b9bd" : "#233e47")) +
+			'" d="' + 转义(径) + '"><title>第 ' + (序 + 1) + ' 笔</title></path>').join("")}</svg>`
+		: 转义(文本 || "—");
+	return `<span class="glyph${大图 ? ' glyph-large' : ''}" aria-hidden="true">${内容}</span>`;
+}
+
+const 根图 = (名, 大图 = false) => 名.startsWith("字形-")
+	? 字图(Number.parseInt(名.slice(3), 16), { 大图 })
+	: 字图(undefined, { 大图, 文本: 笔名[Number(名) - 1] || 名 });
+const 根标题 = (名) => 笔名[Number(名) - 1] || 名;
+const 预览 = (id) => '<figure>' + 字图(id) + '<figcaption>' +
+	(别名(id) ? `${转义(别名(id))}<br>` : '') + '<code>' + 字形名(id) + '</code></figcaption></figure>';
+const 安排 = (值) => typeof 值 === "string" ? 值 : `归并至 ${值.element}`;
+const 根类别 = (项) => 项.核心 ? "核心" : 项.初始 === null ? "动态候选" : 项.落键 === "小集合" ? "准核心" : "";
+
+const 键域列表 = Object.entries(数据.键域).reverse();
+const 根选项 = new Map(数据.字根.map((项) => {
+	const 直落 = new Set(项.空间.filter((值) => typeof 值 === "string"));
+	const 完整键域 = 键域列表.filter(([, 集合]) => [...集合].every((键) => 直落.has(键)));
+	const 归并 = new Set(项.空间.filter((值) => typeof 值 !== "string")
+		.map(({ element }) => element.startsWith("声-") ? "声母" : "字根"));
+	return [项.名称, { 直落, 完整键域, 归并 }];
+}));
+
+function 符合筛选(项, 条件) {
+	const { 直落, 完整键域, 归并 } = 根选项.get(项.名称);
+	const { 落键, 覆盖, 键位, 归并: 归并要求, 类别 } = 条件;
+	const 覆盖符合 = 覆盖 === "无" ? 直落.size === 0
+		: 覆盖 === "部分" ? 直落.size > 0 && 完整键域.length === 0
+		: !覆盖 || 完整键域.some(([名称]) => 名称 === 覆盖);
+	const 归并符合 = 归并要求 === "无" ? 归并.size === 0
+		: !归并要求 || 归并.has(归并要求);
+	return (!落键 || 项.落键 === 落键) && 覆盖符合 && (!键位 || 直落.has(键位)) &&
+		归并符合 && (!类别 || (根类别(项) || "其他") === 类别);
+}
+
+function 决策标签(项) {
+	const 空间 = 项.空间;
+	const [完整集合] = 根选项.get(项.名称).完整键域;
+	if (!完整集合) return 空间.map((值) => 标签(安排(值))).join("");
+	const [名称, 集合] = 完整集合;
+	const 其余 = 空间.filter((值) => typeof 值 !== "string" || !集合.includes(值));
+	return `<span class="chip" title="${转义([...集合].join(" "))}">${名称}</span>` +
+		其余.map((值) => 标签(安排(值))).join("");
+}
+
+function 部件内容(项) {
+	const 单元 = 项.单元.map((组, 序) => '<span class="chip"><i class="dot" style="background:' +
+		单元色(序) + '"></i>' + 转义(组.type) + ' · ' + 笔序(组.strokes) + '</span>').join("");
+	const 候选 = 项.候选.map((组, 序) => '<li class="candidate">' +
+		字图(项.id, { 单元: [{ strokes: 组.笔画 }], 淡化: true }) +
+		'<div><div><code class="candidate-ref">#' + 序 + '</code> ' +
+		组.字根.map(转义).join(" / ") + '</div><span class="muted">' + 笔序(组.笔画) + '</span></div></li>').join("");
+	const 拆分 = 项.拆分.map((组) => '<li class="split"><span class="muted">' + 组.length + ' 根</span>' +
+		组.map((序) => '<span class="chip"><code class="candidate-ref">#' + 序 + '</code> ' +
+			项.候选[序].字根.map(转义).join(" / ") + '</span>').join("") + '</li>').join("");
+	return '<dl class="facts"><div><dt>冻结单元</dt><dd class="chips">' +
+		(单元 || '<span class="muted">无冻结单元</span>') + '</dd></div></dl>' +
+		'<div class="compare"><section><h3>字根候选 <span>' + 项.候选.length +
+		' 个</span></h3><ul class="choices">' + 候选 +
+		'</ul></section><section><h3>合法拆分 <span>' + 项.拆分.length +
+		' 种 · 按根数升序</span></h3><ul class="choices">' + 拆分 +
+		'</ul></section></div>';
+}
+
+function 内容(项) {
+	if (模式 === "部件") return 部件内容(项);
+	if (模式 === "复合体") {
+		const 正根 = 项.正根;
+		const 根 = "字根" in 正根
+			? `<div class="figure-list"><figure>${根图(正根.字根)}<figcaption>${转义(正根.字根)}</figcaption></figure></div>`
+			: `<p>取 <code>${字形名(正根.部件)}</code> 的首根</p>`;
+		const 余根 = 项.余根.map((根) => `<p>取 <code>${字形名(根.部件)}</code> 的前 ${根.数量} 根</p>`).join("");
+		return '<div class="parts"><section><h3>正部</h3><div><div class="figure-list">' + 预览(项.正部) +
+			'</div><h4>正根</h4>' + 根 + '</div></section><section><h3>余部</h3><div><div class="figure-list">' +
+			项.余部.map(预览).join("") + '</div><h4>余根</h4>' + 余根 + '</div></section></div>';
+	}
+	if (模式 === "字根") {
+		const 来源 = 项.来源?.map(预览).join("");
+		return '<dl class="facts">' +
+			'<div><dt>落键</dt><dd class="chips">' + [项.落键, 根类别(项)].filter(Boolean).map(标签).join("") + '</dd></div>' +
+			'<div><dt>决策空间</dt><dd class="chips">' + 决策标签(项) + '</dd></div>' +
+			(项.来源 ? `<div><dt>来源部件</dt><dd class="figure-list">${来源 || "无来源部件记录"}</dd></div>` : "") + '</dl>';
+	}
+	return `<dl class="facts"><div><dt>受影响的复合体（${项.影响.length}）</dt>
+		<dd class="figure-list">${项.影响.map(预览).join("")}</dd></div></dl>`;
+}
+
+function 卡片(项) {
+	const 根名 = 项.名称 ?? 项.字根;
+	const id = 根名 ?? 字形名(项.id);
+	const 标题 = 根名 ? 根标题(根名) : 别名(项.id) || id;
+	const 图 = 根名 ? 根图(根名, true) : 字图(项.id, { 大图: true, 单元: 项.单元 });
+	return `<article class="card">
+		<header class="card-head">${图}<div><h2>${转义(标题)}</h2>${标题 === id ? "" : `<code>${转义(id)}</code>`}</div></header>
+		<div class="card-body">${内容(项)}</div>
+	</article>`;
+}
+
+const 加载点 = 取("more");
+const 观察 = new IntersectionObserver(([记录]) => {
+	if (记录.isIntersecting && 已展示 < 结果.length) 加载();
+}, { rootMargin: "600px" });
+
+let 网格尺寸 = "";
+let 列底 = [];
+let 已排列 = 0;
+
+function 排列(重排 = false) {
+	if (模式 === "字根" || 已展示 === 0) {
+		列表.style.height = "";
+		加载点.style.top = "100%";
+		return;
+	}
+	const 样式 = getComputedStyle(列表);
+	const 模板 = 样式.gridTemplateColumns;
+	const 间距 = Number.parseFloat(样式.columnGap);
+	const 尺寸 = `${模板} / ${间距}`;
+	const 列数 = 模板.split(" ").length;
+	const 卡宽 = (列表.getBoundingClientRect().width - 间距 * (列数 - 1)) / 列数;
+	if (重排 || 尺寸 !== 网格尺寸) {
+		网格尺寸 = 尺寸;
+		列底 = Array(列数).fill(0);
+		已排列 = 0;
+		列表.style.setProperty("--card-width", `${卡宽}px`);
+	}
+	if (已排列 === 已展示) return;
+
+	const 卡片列表 = Array.from(列表.children).slice(已排列);
+	const 高度 = 卡片列表.map((卡) => 卡.getBoundingClientRect().height);
+	for (const [序号, 卡] of 卡片列表.entries()) {
+		const 列 = 列底.indexOf(Math.min(...列底));
+		卡.style.left = `${列 * (卡宽 + 间距)}px`;
+		卡.style.top = `${列底[列]}px`;
+		列底[列] += 高度[序号] + 间距;
+	}
+	已排列 = 已展示;
+	列表.style.height = `${Math.max(...列底) - 间距}px`;
+	// 任一列接近末尾就加载下一批，长卡片旁的短列也能继续填充。
+	加载点.style.top = `${Math.min(...列底)}px`;
+}
+
+function 加载() {
+	观察.unobserve(加载点);
+	const 批次 = 结果.slice(已展示, 已展示 + 每批);
+	列表.insertAdjacentHTML("beforeend", 批次.map(卡片).join(""));
+	已展示 += 批次.length;
+	排列();
+	if (已展示 < 结果.length) 观察.observe(加载点);
+}
+
+function 绘制() {
+	筛选表.hidden = 模式 !== "字根";
+	const 条件 = 模式 === "字根" ? Object.fromEntries(new FormData(筛选表)) : null;
+	取("reset-root-filters").disabled = !条件 || !Object.values(条件).some(Boolean);
+	const 词 = 查询.value.trim().toLowerCase();
+	const 匹配字形 = new Set(数据.字.filter((项) => 项.字 === 词).map((项) => 项.字形));
+	const 匹配根名 = new Set([...匹配字形].map(字形名));
+	结果 = 数据[模式].filter((项) => {
+		if (条件 && !符合筛选(项, 条件)) return false;
+		const id = 项.id;
+		return !词 || JSON.stringify(项).toLowerCase().includes(词) ||
+			(id !== undefined && (字形名(id).includes(词) || 匹配字形.has(id))) ||
+			匹配根名.has(项.名称) || 匹配根名.has(项.字根);
+	});
+	取("count").textContent = 结果.length === 数据[模式].length
+		? `${结果.length.toLocaleString("zh-CN")} 项`
+		: `${结果.length.toLocaleString("zh-CN")} / ${数据[模式].length.toLocaleString("zh-CN")} 项`;
+	列表.dataset.layout = 模式;
+	列表.innerHTML = 结果.length ? "" : '<p class="empty">没有匹配结果。</p>';
+	已展示 = 0;
+	网格尺寸 = "";
+	window.scrollTo(0, 0);
+	加载();
+}
+
+for (const 按钮 of 选项) {
+	按钮.addEventListener("click", () => {
+		if (模式 === 按钮.dataset.mode) return;
+		模式 = 按钮.dataset.mode;
+		for (const 项 of 选项) 项.setAttribute("aria-pressed", String(项 === 按钮));
+		绘制();
+	});
+}
+查询.addEventListener("input", 绘制);
+筛选表.addEventListener("change", 绘制);
+取("reset-root-filters").addEventListener("click", () => {
+	筛选表.reset();
+	绘制();
+});
+new ResizeObserver(() => 排列()).observe(列表);
+document.fonts.ready.then(() => 排列(true));
+绘制();
+</script>
+</body>
+</html>

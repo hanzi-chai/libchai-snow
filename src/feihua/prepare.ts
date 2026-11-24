@@ -24,6 +24,7 @@ import {
 } from "hanzi-chai";
 import { dump } from "js-yaml";
 import 方案, { 保留小集合, 生成声母归并 } from "./config.ts";
+import { 比较笔画顺序 } from "./report.ts";
 
 const 小集合 = "aoeiuv;/";
 const 补集合 = "bpmfdtnlgkhjqxzcsryw,.";
@@ -63,7 +64,9 @@ type 候选 = { 笔画: number[]; 字根: string[] };
 type 部件输入 = { id: number; 单元: 单元[]; 候选: 候选[]; 拆分: number[][] };
 type 字输入 = { 字: string; 字形: number; 声母: string[] };
 export type 飞花输入 = {
-	版本: 2;
+	版本: 3;
+	局部约束: number[][][];
+	初始拆分: number[];
 	配置: 配置;
 	字根: 根[];
 	部件: 部件输入[];
@@ -209,7 +212,7 @@ function 检查空间(方案: 配置, 取字形: (id: number) => 字形) {
 		return 键;
 	}
 	for (const 根 of 字根.values()) 解析初始(根);
-	return 字根;
+	return { 字根, 初始键 };
 }
 
 function 选核心根(字根: Map<string, 根>, 部件表: 部件输入[]) {
@@ -319,6 +322,242 @@ export function 笔形签名(件: 部件, 索引: number[]): string {
 	const 矩阵 = 索引.map((i) => 索引.map((j) => 件.拓扑.新关系矩阵[i][j]));
 	const 划分 = 拓扑.划分连通子图(矩阵);
 	return JSON.stringify([笔名, 矩阵, 划分, 拓扑.计算子图关系(划分, 笔形)]);
+}
+
+// 每类保存按局部拆法分组的全局拆分编号，Rust 在加载时编译冲突索引。
+function 局部约束(部件列表: 部件输入[], 字形: 部件[]): number[][][] {
+	const 类表 = new Map<string, Map<string, Set<number>>>();
+	let 编号 = 0;
+	for (const [i, 件] of 部件列表.entries()) {
+		const 缓存 = new Map<number, string>();
+		for (const 分法 of 件.拆分) {
+			const 根组 = 分法.map((j) => 件.候选[j]);
+			const 笔数 = 字形[i].笔画数();
+			// 连续区间的首笔必为某个根的首笔。相交根的总笔数等于区间长度时，
+			// 这些根恰好完整覆盖区间（包括彼此笔顺交错的根）。
+			const 归属: 候选[] = [];
+			for (const 根 of 根组) for (const 笔 of 根.笔画) 归属[笔] = 根;
+			for (const 首根 of 根组) {
+				const 首 = 首根.笔画[0];
+				const 所见 = new Set<候选>();
+				let 覆盖 = 0;
+				for (let 末 = 首; 末 <= 笔数; 末++) {
+					const 根 = 归属[末];
+					if (根.笔画[0] < 首) break;
+					if (!所见.has(根)) {
+						所见.add(根);
+						覆盖 += 根.笔画.length;
+					}
+					if (覆盖 !== 末 - 首 + 1) continue;
+					const 键 = 首 * (笔数 + 1) + 末;
+					let 签名 = 缓存.get(键);
+					if (签名 === undefined) {
+						const 拓扑 = 笔形签名(
+							字形[i],
+							Array.from({ length: 覆盖 }, (_, 位) => 首 - 1 + 位),
+						);
+						// 合法拆分中的每个单元总在一个根内；完整根区间不会切开单元。
+						const 单元 = 件.单元
+							.filter((组) => 首 <= 组.strokes[0] && 组.strokes[0] <= 末)
+							.map((组) => ({
+								类别: 组.type,
+								笔位: 组.strokes.map((笔) => 笔 - 首).sort((a, b) => a - b),
+							}))
+							.sort((a, b) => a.笔位[0] - b.笔位[0]);
+						签名 = JSON.stringify([拓扑, 单元]);
+						缓存.set(键, 签名);
+					}
+					const 拆法 = JSON.stringify(
+						[...所见].map((根) => [根.字根[0], 根.笔画.map((笔) => 笔 - 首)]),
+					);
+					const 类 = 类表.get(签名) ?? new Map<string, Set<number>>();
+					类表.set(签名, 类);
+					const 组 = 类.get(拆法) ?? new Set<number>();
+					类.set(拆法, 组);
+					组.add(编号);
+				}
+			}
+			编号++;
+		}
+	}
+	return [...类表.values()]
+		.filter((类) => 类.size > 1)
+		.map((类) => [...类.values()].map((组) => [...组]));
+}
+
+// 输入中的拆分按根数升序排列。同根数时优先原有枚举顺序。
+function 选择初始拆分(
+	部件: 部件输入[],
+	初始键: Map<string, string>,
+	约束: number[][][],
+): number[] {
+	const 起点: number[] = [];
+	let 总数 = 0;
+	const 域 = 部件.map((件) => {
+		const 起 = 总数;
+		起点.push(起);
+		总数 += 件.拆分.length;
+		const 可用 = 件.候选.map((候) =>
+			候.字根.some((名) => {
+				const 键 = 初始键.get(名);
+				return 键 !== undefined && 小集合.includes(键);
+			}),
+		);
+		const 选择: number[] = [];
+		let 最短 = Infinity;
+		for (const [i, 分] of 件.拆分.entries()) {
+			if (分.length > 最短) break;
+			if (分.every((根) => 可用[根])) {
+				最短 = 分.length;
+				选择.push(起 + i);
+			}
+		}
+		if (!选择.length) throw Error(`初始键位无法拆分 ${根名(件.id)}`);
+		return 选择;
+	});
+	const 有效 = new Set(域.flat());
+	const 冲突 = new Map<number, Set<number>>();
+	for (const 类 of 约束) {
+		const 各组 = 类
+			.map((组) => 组.filter((号) => 有效.has(号)))
+			.filter((组) => 组.length);
+		for (const [i, 组] of 各组.entries())
+			for (const 他组 of 各组.slice(i + 1)) {
+				for (const 甲 of 组)
+					for (const 乙 of 他组) {
+						if (!冲突.has(甲)) 冲突.set(甲, new Set());
+						if (!冲突.has(乙)) 冲突.set(乙, new Set());
+						冲突.get(甲)?.add(乙);
+						冲突.get(乙)?.add(甲);
+					}
+			}
+	}
+	const 顺序 = 域.map((_, i) => i).sort((a, b) => 域[a].length - 域[b].length);
+	const 禁用数 = new Uint32Array(总数);
+	const 解: number[] = [];
+	function 搜索(步: number): boolean {
+		if (步 === 顺序.length) return true;
+		const 件 = 顺序[步];
+		for (const 号 of 域[件]) {
+			if (禁用数[号]) continue;
+			解[件] = 号 - 起点[件];
+			const 邻居 = 冲突.get(号) ?? [];
+			for (const 邻 of 邻居) 禁用数[邻]++;
+			if (搜索(步 + 1)) return true;
+			for (const 邻 of 邻居) 禁用数[邻]--;
+		}
+		return false;
+	}
+	if (!搜索(0))
+		throw Error("初始键位下没有满足连续局部及单元一致约束的最少根拆分组合");
+	return 解;
+}
+
+function 重排特征(件: 部件) {
+	const { 新关系矩阵, 划分, 子图关系矩阵 } = 件.拓扑;
+	const 笔名 = 件.笔画列表.map(
+		({ feature }) => 默认退化配置.feature?.[feature] ?? feature,
+	);
+	const 子图: number[] = [];
+	for (const [i, 笔画] of 划分.entries()) for (const 笔 of 笔画) 子图[笔] = i;
+	// 只有边的存在性与方向无关时，才能用原笔序的子图关系剪枝。
+	const 子图可重排 = 新关系矩阵.every((行, i) =>
+		行.every(
+			(值, j) => (值 === undefined) === (新关系矩阵[j][i] === undefined),
+		),
+	);
+	const 关系 = 新关系矩阵.map((行, i) =>
+		行.map((值, j) => {
+			const 前 = 子图[i];
+			const 后 = 子图[j];
+			return JSON.stringify([
+				值,
+				子图可重排 && 前 !== 后 ? 子图关系矩阵[前][后] : null,
+			]);
+		}),
+	);
+	const 指纹 = 笔名.map((名, i) =>
+		JSON.stringify([
+			名,
+			笔名.map((邻, j) => JSON.stringify([邻, 关系[i][j], 关系[j][i]])).sort(),
+		]),
+	);
+	return { 件, 关系, 指纹, 分组: JSON.stringify([...指纹].sort()) };
+}
+
+type 重排字形 = ReturnType<typeof 重排特征>;
+
+function 查重排(
+	原: 重排字形,
+	目标: 重排字形,
+	目标签名: string,
+): number[] | undefined {
+	const 笔顺: number[] = [];
+	const 已用 = new Set<number>();
+	const 对应 = 目标.指纹.map((值) =>
+		原.指纹.flatMap((指纹, i) => (值 === 指纹 ? [i] : [])),
+	);
+	function 搜索(): boolean {
+		const 位 = 笔顺.length;
+		if (位 === 对应.length) return 笔形签名(原.件, 笔顺) === 目标签名;
+		for (const 笔 of 对应[位]) {
+			if (
+				已用.has(笔) ||
+				!笔顺.every(
+					(前笔, i) =>
+						原.关系[笔][前笔] === 目标.关系[位][i] &&
+						原.关系[前笔][笔] === 目标.关系[i][位],
+				)
+			)
+				continue;
+			笔顺.push(笔);
+			已用.add(笔);
+			if (搜索()) return true;
+			已用.delete(笔);
+			笔顺.pop();
+		}
+		return false;
+	}
+	return 搜索() ? 笔顺 : undefined;
+}
+
+function 检查重排归并(
+	部件根: Iterable<[string, 部件]>,
+	字根: ReadonlyMap<string, 根>,
+	签名: (件: 部件) => string,
+) {
+	function 归并终点(名称: string): string {
+		const 空间 = 字根.get(名称)?.空间;
+		if (空间?.length === 1 && typeof 空间[0] !== "string")
+			return 归并终点(空间[0].element);
+		return 名称;
+	}
+	const 分组 = new Map<
+		string,
+		{ 名称: string; 字形: 重排字形; 终点: string; 签名: string }[]
+	>();
+	const 冲突: string[] = [];
+	for (const [名称, 件] of 部件根) {
+		if (件.笔画数() < 2) continue;
+		const 字形 = 重排特征(件);
+		const 原签名 = 签名(件);
+		const 终点 = 归并终点(名称);
+		const 列表 = 分组.get(字形.分组) ?? [];
+		for (const 目标 of 列表) {
+			if (终点 === 目标.终点 || 原签名 === 目标.签名) continue;
+			const 笔顺 = 查重排(字形, 目标.字形, 目标.签名);
+			if (笔顺)
+				冲突.push(
+					`${名称} 按 ${笔顺.map((笔) => 笔 + 1).join("、")} 重排，与 ${目标.名称} 签名相同`,
+				);
+		}
+		列表.push({ 名称, 字形, 终点, 签名: 原签名 });
+		分组.set(字形.分组, 列表);
+	}
+	if (冲突.length)
+		console.warn(
+			`警告：字根笔顺重排冲突（${冲突.length} 对），可在 config.ts 中固定归并到同一主根：\n${冲突.join("\n")}`,
+		);
 }
 
 function 笔顺连通(件: 部件, 笔画: number[]): boolean {
@@ -456,11 +695,16 @@ function 证明备选(
 	查初始根: (形: 字形) => string | undefined,
 	签名: (件: 部件) => string,
 	备选: Map<string, string>,
+	整件签名: ReadonlyMap<number, string>,
 	优先: Set<number>,
 ) {
 	const 危险 = new Map<string, number[]>();
 	let 分支数 = 0;
 	for (const 形 of 复合体) {
+		const 冻结分部 = 确保存在(基线.get(形.id), "缺少冻结分部");
+		const 冻结正根 = 冻结分部.正根;
+		const 冻结部件签名 =
+			"部件" in 冻结正根 ? 整件签名.get(冻结正根.部件) : undefined;
 		function 验证(条件: Map<string, boolean>) {
 			try {
 				const 结果 = 分部取根(
@@ -478,7 +722,16 @@ function 证明备选(
 					优先,
 				);
 				分支数++;
-				if (!相同(结果, 基线.get(形.id))) {
+				// 启用的备选必在小集合；它若覆盖冻结部件的全部笔画，
+				// 该部件唯一的最少根拆分就是这个根，仍可沿用首根请求。
+				if (
+					冻结部件签名 !== undefined &&
+					条件.get(冻结部件签名) === true &&
+					"字根" in 结果.正根 &&
+					结果.正根.字根 === 备选.get(冻结部件签名)
+				)
+					结果.正根 = 冻结正根;
+				if (!相同(结果, 冻结分部)) {
 					for (const [键, 启用] of 条件)
 						if (启用) {
 							const 列表 = 危险.get(键) ?? [];
@@ -502,19 +755,20 @@ export function 准备飞花(): 飞花输入 {
 	const 字库 = 获取字库(方案);
 	const 融合集合 = 获取融合字形集合({}, 方案.data);
 	const 分析缓存 = new Map<number, 字形>();
+	const 展开笔画 = (形: 字形) =>
+		new 部件({
+			id: 形.id,
+			type: "component",
+			operator: undefined,
+			references: undefined,
+			strokes: 形.图形盒子.获取笔画列表(),
+		});
 	function 融合(形: 字形): 字形 {
 		const 已有 = 分析缓存.get(形.id);
 		if (已有) return 已有;
 		let 结果: 字形 = 形;
 		if (!是部件(形)) {
-			if (融合集合.has(形.id))
-				结果 = new 部件({
-					id: 形.id,
-					type: "component",
-					operator: undefined,
-					references: undefined,
-					strokes: 形.图形盒子.获取笔画列表(),
-				});
+			if (融合集合.has(形.id)) 结果 = 展开笔画(形);
 			else 结果 = 形.替换分析部分(形.部分列表.map(融合));
 		}
 		分析缓存.set(形.id, 结果);
@@ -522,7 +776,7 @@ export function 准备飞花(): 飞花输入 {
 	}
 	const 取字形 = (id: number) =>
 		融合(确保存在(字库.获取字形(id), `缺少字形：${根名(id)}`));
-	const 字根 = 检查空间(方案, 取字形);
+	const { 字根, 初始键 } = 检查空间(方案, 取字形);
 	const 分类器 = 合并分类器(方案.analysis?.classifier);
 	const 全形签名 = new Map<number, string>();
 	function 签名(件: 部件): string {
@@ -537,9 +791,11 @@ export function 准备飞花(): 飞花输入 {
 		return 值;
 	}
 	const 同形根 = new Map<string, 根[]>();
+	const 重排根 = new Map<string, 部件>();
 	for (const 根 of 字根.values()) {
 		if (/^[1-5]$/.test(根.名称)) continue;
 		const 形 = 取字形(Number.parseInt(根.名称.slice(3), 16));
+		重排根.set(根.名称, 是部件(形) ? 形 : 展开笔画(形));
 		if (!是部件(形)) continue;
 		const 键 = 签名(形);
 		const 列表 = 同形根.get(键) ?? [];
@@ -615,6 +871,9 @@ export function 准备飞花(): 飞花输入 {
 	const 冻结 = new Map(
 		分部列表.map((形) => [形.id, 分部取根(形, 查初始根, 优先)]),
 	);
+	// 编码只读取字本身的冻结分部；子结构直接从字形树定位部件。
+	const 编码字形 = new Set(字列表.map((字) => 字.字形));
+	const 编码复合体 = 分部列表.filter((形) => 编码字形.has(形.id));
 	const 部件列表 = [...部件集合.values()].sort((a, b) => a.id - b.id);
 	const 单元记录 = 读取单元(部件列表);
 	console.log(
@@ -629,11 +888,14 @@ export function 准备飞花(): 飞花输入 {
 		string,
 		{ 件: 部件; 笔画: number[]; 已有: number[] }
 	>();
-	for (const { 件, 候选 } of 所有候选)
+	const 整件签名 = new Map<number, string>();
+	for (const { 件, 候选 } of 所有候选) {
 		for (const 项 of 候选) {
+			if (项.笔画.length === 件.笔画数()) 整件签名.set(件.id, 项.签名);
 			if (项.笔画.length > 1 && !认同类.has(项.签名))
 				认同类.set(项.签名, { 件, 笔画: 项.笔画, 已有: [] });
 		}
+	}
 	// 全库仅扫描一次。配置的融合件采用融合后的完整笔形。
 	for (const [id, 原形] of 字库.字形迭代器()) {
 		const 形 = 是部件(原形) || 融合集合.has(id) ? 融合(原形) : undefined;
@@ -662,10 +924,27 @@ export function 准备飞花(): 飞花输入 {
 				strokes: 类.笔画.map((i) => 类.件.矢量图形[i]),
 			});
 	}
-	const 证明 = 证明备选(分部列表, 冻结, 查初始根, 签名, 备选, 优先);
+	const 证明 = 证明备选(编码复合体, 冻结, 查初始根, 签名, 备选, 整件签名, 优先);
 	const 安全备选 = new Map([...备选].filter(([键]) => !证明.危险.has(键)));
-	const 复核 = 证明备选(分部列表, 冻结, 查初始根, 签名, 安全备选, 优先);
+	const 复核 = 证明备选(
+		编码复合体,
+		冻结,
+		查初始根,
+		签名,
+		安全备选,
+		整件签名,
+		优先,
+	);
 	if (复核.危险.size) throw Error("备选子集证明失败");
+	for (const [键, 名] of 安全备选) {
+		const 自定义字形 = 自定义.get(键);
+		const 形 = 自定义字形
+			? new 部件(自定义字形)
+			: 取字形(Number.parseInt(名.slice(3), 16));
+		if (!是部件(形)) throw Error(`备选字根必须是部件：${名}`);
+		重排根.set(名, 形);
+	}
+	检查重排归并(重排根, 字根, 签名);
 	console.log(
 		`字根认同完成：${认同类.size} 类，备选保留 ${安全备选.size}，剔除 ${证明.危险.size}，证明 ${证明.分支数 + 复核.分支数} 条分支`,
 	);
@@ -745,8 +1024,14 @@ export function 准备飞花(): 飞花输入 {
 				: 取多笔根(签名(件));
 		return 名 === undefined ? [] : [{ 字形: 件.id, 字根: [名], 重复: 1 }];
 	});
+	const 约束 = 局部约束(
+		部件输入列表,
+		所有候选.map(({ 件 }) => 件),
+	);
 	const 输入: 飞花输入 = {
-		版本: 2,
+		版本: 3,
+		局部约束: 约束,
+		初始拆分: 选择初始拆分(部件输入列表, 初始键, 约束),
 		配置: 生成配置,
 		字根: [...字根.values()],
 		部件: 部件输入列表,
@@ -771,13 +1056,9 @@ export function 准备飞花(): 飞花输入 {
 			报告图形.set(id, 是部件(形) ? 形.矢量图形 : 形.图形盒子.获取笔画列表());
 		}
 	}
-	const 图形 = [...报告图形].map(([id, 笔画]) => ({
-		id,
-		路径: 生成笔画路径(笔画),
-	}));
 	const 报告 = 生成报告(
 		输入,
-		图形,
+		报告图形,
 		[...证明.危险].map(([键, 影响]) => ({
 			字根: 确保存在(备选.get(键), "备选缺失"),
 			影响,
@@ -798,211 +1079,60 @@ export function 准备飞花(): 飞花输入 {
 
 function 生成报告(
 	输入: 飞花输入,
-	图形: { id: number; 路径: string[] }[],
+	报告图形: ReadonlyMap<number, 矢量图形数据>,
 	危险: { 字根: string; 影响: number[] }[],
 ) {
+	const 来源部件 = new Map<string, Set<number>>();
+	for (const 件 of 输入.部件)
+		for (const 候选 of 件.候选)
+			for (const 名 of 候选.字根) {
+				if (!名.startsWith("字形-f")) continue;
+				const 来源 = 来源部件.get(名) ?? new Set<number>();
+				来源.add(件.id);
+				来源部件.set(名, 来源);
+			}
+	const 默认笔画 = Object.entries(合并分类器());
+	const 笔画顺位 = new Map(默认笔画.map(([笔], 序) => [笔, 序]));
+	const 单笔名称 = [1, 2, 3, 4, 5].map(
+		(类) =>
+			确保存在(
+				默认笔画.find(([, 值]) => 值 === 类),
+				"缺少单笔类别",
+			)[0],
+	);
+	const 字根 = 输入.字根.map((根) => {
+		const id = 根.名称;
+		const 笔画名称 = id.startsWith("字形-")
+			? 确保存在(
+					报告图形.get(Number.parseInt(id.slice(3), 16)),
+					`缺少字根图形：${id}`,
+				).map((笔) => 笔.feature)
+			: [单笔名称[Number(id) - 1]];
+		return { id, 笔画名称, 根 };
+	});
 	const 数据 = JSON.stringify({
 		...输入,
 		配置: undefined,
-		图形,
+		键域,
+		字根: 字根
+			.sort((甲, 乙) => 比较笔画顺序(甲, 乙, 笔画顺位))
+			.map(({ 根 }) => ({
+				...根,
+				来源: 根.名称.startsWith("字形-f")
+					? [...(来源部件.get(根.名称) ?? [])]
+					: undefined,
+			})),
+		图形: [...报告图形].map(([id, 笔画]) => ({
+			id,
+			路径: 生成笔画路径(笔画),
+		})),
 		危险,
 	}).replaceAll("<", "\\u003c");
-	const 模板 = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>飞花分部、字根与拆分核查</title>
-<style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:0 20px;color:#223}input,select,button{font:inherit;padding:8px;margin:6px}svg{width:110px;height:110px;vertical-align:middle}summary{cursor:pointer;padding:10px 0}details{border-bottom:1px solid #ddd}code{overflow-wrap:anywhere}pre{white-space:pre-wrap}nav{position:sticky;top:0;background:white;padding:12px;z-index:1}path{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:2}.card{border-bottom:1px solid #ddd;padding:12px 0}.preview{display:inline-block;text-align:center;margin-right:20px}.choices{max-height:500px;overflow:auto}</style>
-<h1>飞花分部、字根与拆分核查</h1><p id="stats"></p><nav><select id="mode" aria-label="核查内容"><option value="部件">部件与合法拆分</option><option value="复合体">冻结分部</option><option value="字根">字根与决策空间</option><option value="危险">剔除备选</option><option value="字">字符与声母</option></select><input id="query" aria-label="搜索" placeholder="输入汉字、字形 ID 或字根"><button type="button" id="prev">上一页</button><button type="button" id="next">下一页</button><span id="page"></span></nav><main id="rows"></main>
-<script>
-const data = "{{data}}";
-const byId = new Map(data.图形.map((x) => [x.id, x.路径]));
-const chars = new Map();
-for (const x of data.字) chars.set(x.字形, (chars.get(x.字形) || "") + x.字);
-const colors = ["#b44", "#37a", "#398", "#a73", "#859", "#688"];
-let page = 0;
-const mode = document.getElementById("mode"),
-	query = document.getElementById("query"),
-	rows = document.getElementById("rows");
-const name = (id) => "字形-" + id.toString(16).padStart(5, "0");
-const escape = (s) =>
-	String(s).replace(
-		/[&<>"']/g,
-		(c) =>
-			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-				c
-			],
+	const 模板 = readFileSync(
+		new URL("./inspection.html", import.meta.url),
+		"utf8",
 	);
-const svg = (id, units = []) =>
-	'<svg viewBox="0 0 100 100">' +
-	(byId.get(id) || [])
-		.map(
-			(d, i) =>
-				'<path stroke="' +
-				(colors[units.findIndex((u) => u.strokes.includes(i + 1))] || "#222") +
-				'" d="' +
-				escape(d) +
-				'"><title>第 ' +
-				(i + 1) +
-				" 笔</title></path>",
-		)
-		.join("") +
-	"</svg>";
-const preview = (id) =>
-	'<span class="preview">' +
-	svg(id) +
-	"<br>" +
-	name(id) +
-	" " +
-	escape(chars.get(id) || "") +
-	"</span>";
-const rootSvg = (r) =>
-	r.startsWith("字形-")
-		? svg(parseInt(r.slice(3), 16))
-		: ["横", "竖", "撇", "点", "折"][Number(r) - 1];
-document.getElementById("stats").textContent =
-	data.字.length +
-	" 条字符字形；" +
-	data.部件.length +
-	" 个部件；" +
-	data.复合体.length +
-	" 个复合体；" +
-	data.字根.length +
-	" 个字根；剔除 " +
-	data.危险.length +
-	" 个备选。";
-function row(x) {
-	if (mode.value === "部件")
-		return (
-			"<details><summary>" +
-			name(x.id) +
-			" " +
-			escape(chars.get(x.id) || "") +
-			" · " +
-			x.候选.length +
-			" 个候选 · " +
-			x.拆分.length +
-			" 种拆分</summary>" +
-			svg(x.id, x.单元) +
-			"<p>单元：" +
-			escape(JSON.stringify(x.单元)) +
-			'</p><details><summary>字根候选</summary><div class="choices">' +
-			x.候选
-				.map(
-					(c, i) =>
-						"<p>#" +
-						i +
-						" " +
-						svg(x.id, [{ strokes: c.笔画 }]) +
-						" " +
-						escape(c.字根.join(" / ")) +
-						"（第 " +
-						c.笔画.join("、") +
-						" 笔）</p>",
-				)
-				.join("") +
-			'</div></details><details><summary>全部合法拆分（按根数排序）</summary><div class="choices">' +
-			x.拆分
-				.map(
-					(s) =>
-						"<p>" +
-						s
-							.map((i) => escape(x.候选[i].字根.join("/")) + " [#" + i + "]")
-							.join(" + ") +
-						"</p>",
-				)
-				.join("") +
-			"</div></details></details>"
-		);
-	if (mode.value === "复合体")
-		return (
-			'<div class="card">' +
-			preview(x.id) +
-			"<p>正部：" +
-			preview(x.正部) +
-			"</p><p>正根：" +
-			("字根" in x.正根
-				? rootSvg(x.正根.字根) + " " + x.正根.字根
-				: "取 " + name(x.正根.部件) + " 的首根") +
-			"</p><p>余部：" +
-			x.余部.map(preview).join("") +
-			"</p><p>余根：" +
-			x.余根
-				.map((r) => "取 " + name(r.部件) + " 的前 " + r.数量 + " 根")
-				.join("；") +
-			"</p></div>"
-		);
-	if (mode.value === "字根")
-		return (
-			'<div class="card">' +
-			rootSvg(x.名称) +
-			" <b>" +
-			x.名称 +
-			"</b><p>落键：" +
-			x.落键 +
-			(x.核心 ? " · 核心" : x.初始 === null ? " · 动态候选" : x.落键 === "小集合" ? " · 准核心" : "") +
-			"；初始安排：" +
-			(x.初始 === null ? "未启用" : escape(JSON.stringify(x.初始))) +
-			"</p><p>空间：" +
-			escape(JSON.stringify(x.空间)) +
-			"</p></div>"
-		);
-	if (mode.value === "危险")
-		return (
-			"<details><summary>" +
-			rootSvg(x.字根) +
-			" " +
-			x.字根 +
-			" · 影响 " +
-			x.影响.length +
-			" 个复合体</summary>" +
-			x.影响.map(preview).join("") +
-			"</details>"
-		);
-	return (
-		"<p>" +
-		escape(x.字) +
-		" · " +
-		name(x.字形) +
-		" · 声母键 " +
-		x.声母.join("、") +
-		"</p>"
-	);
-}
-function render() {
-	const q = query.value.trim();
-	const ids = new Set(data.字.filter((x) => x.字 === q).map((x) => x.字形));
-	const names = [...ids].map(name);
-	const all = data[mode.value].filter(
-		(x) =>
-			!q ||
-			JSON.stringify(x).includes(q) ||
-			(x.id !== undefined && (name(x.id).includes(q) || ids.has(x.id))) ||
-			names.includes(x.名称) ||
-			names.includes(x.字根),
-	);
-	const total = Math.max(1, Math.ceil(all.length / 40));
-	page = Math.max(0, Math.min(page, total - 1));
-	document.getElementById("page").textContent =
-		page + 1 + " / " + total + "（" + all.length + " 项）";
-	rows.innerHTML = all
-		.slice(page * 40, (page + 1) * 40)
-		.map(row)
-		.join("");
-}
-const restart = () => {
-	page = 0;
-	render();
-};
-mode.onchange = restart;
-query.oninput = restart;
-document.getElementById("prev").onclick = () => {
-	page--;
-	render();
-};
-document.getElementById("next").onclick = () => {
-	page++;
-	render();
-};
-render();
-</script></html>`;
-	return 模板.replace('"{{data}}"', 数据);
+	return 模板.replace('"{{data}}"', () => 数据);
 }
 
 if (

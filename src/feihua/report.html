@@ -26,6 +26,15 @@ label{display:flex;align-items:center;gap:5px}.count,.hint{font-size:12px;color:
 .grid{display:grid;gap:12px;align-items:start}
 .characters-grid{grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}
 .components-grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+:root:has(.collision-groups) :is(header,main,.controls-inner,.hint){max-width:none}
+.collision-groups{display:flex;flex-wrap:wrap;gap:12px}
+.collision-group{flex:1 1 calc(var(--columns) * clamp(180px,15vw,224px) + 20px);min-width:0;max-width:100%;padding:10px;background:#e9eff6;border:1px solid #d5dfe9;border-radius:12px}
+.collision-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:10px}
+.collision-head h2{margin:0}.collision-detail{font-size:12px;color:var(--muted)}
+.collision-group .card-head h3{font-size:19px;margin:0}
+.collision-members{grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px}
+.collision-members .card{padding:10px}
+.collision-groups .empty{width:100%}
 .card{background:white;border:1px solid var(--line);border-radius:10px;padding:13px;min-width:0}
 .card-head{display:flex;gap:7px;align-items:center}.card-head h2{font-size:19px;margin:0}
 .tag{font-size:10px;background:#edf2f6;padding:2px 5px;border-radius:4px;color:var(--muted)}
@@ -60,12 +69,13 @@ label{display:flex;align-items:center;gap:5px}.count,.hint{font-size:12px;color:
 </style>
 </head>
 <body>
-<header><div><h1>冰雪飞花 · 拆分取码</h1><div class="summary" id="summary"></div></div><div class="links"><a href="root-chart.png">字根图</a><a href="root-chart.pdf">PDF</a><a href="code.txt">码表</a><a href="feihua-beta.json">小鱼数据</a></div></header>
+<header><div><h1>冰雪飞花 · 拆分取码</h1><div class="summary" id="summary"></div></div><div class="links"><a href="root-chart.png">字根图</a><a href="root-chart.pdf">字根图 PDF</a><a href="component-splits.pdf">基本拆分 PDF</a><a href="code.txt">码表</a><a href="feihua-beta.json">小鱼数据</a></div></header>
 <div class="controls"><div class="controls-inner">
 <div class="tabs" role="tablist" aria-label="查看内容"><button type="button" role="tab" id="characters-tab" aria-selected="true" aria-controls="view" data-mode="characters">看字</button><button type="button" role="tab" id="components-tab" aria-selected="false" aria-controls="view" data-mode="components">部件基本拆分</button></div>
-<input id="query" type="search" aria-label="搜索" placeholder="搜索字、字形 ID 或编码">
+<input id="query" type="search" aria-label="搜索" aria-describedby="hint" placeholder="搜索字、字形 ID 或编码">
 <select id="kind" aria-label="字形类型"><option value="all">全部字</option><option value="部件">部件字</option><option value="复合体">复合体字</option></select>
 <label id="collision-control"><input id="collisions" type="checkbox">只看重码字</label>
+<label id="collision-filter" hidden>形码元素差异<select id="collision-difference"><option value="all">全部重码组</option><option value="">第 2–4 位元素一样</option></select></label>
 <label id="trivial-control" hidden title="隐藏完整基本拆分只有一个根的部件"><input id="hide-trivial" type="checkbox" checked>隐藏平凡拆分</label>
 <span class="count" id="count" aria-live="polite"></span>
 </div><p class="hint" id="hint"></p></div>
@@ -78,7 +88,7 @@ label{display:flex;align-items:center;gap:5px}.count,.hint{font-size:12px;color:
 <script>
 const 数据=JSON.parse(document.getElementById('report-data').textContent);
 const 颜色="{{palette}}";
-const 拆分颜色=[颜色.component1,颜色.component2,颜色.component3,'#bc6100','#c13e32','#405365','#8a6800'];
+const 拆分颜色="{{split-palette}}";
 const 索引=new Map(数据.字形.map(项=>[项.id,项]));
 const 部件索引=new Map(数据.部件顺序.map(id=>[id,索引.get(id)]));
 const 转义=值=>String(值).replace(/[&<>"']/g,字=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[字]));
@@ -88,50 +98,105 @@ function 名称(id){const 项=索引.get(id);return 项?(项.minimal[0]||项.名
 function 图解(项,基本拆分){const 色表=new Map();if(基本拆分){for(const [i,根]of 项.完整拆分.entries())for(const 笔 of 根.笔画)色表.set(笔,拆分颜色[i%拆分颜色.length]);}else{for(const 根 of 项.roots)for(const 笔 of 根.strokes)色表.set(笔,颜色[根.colorRole]);}return `<div class="drawing"><svg viewBox="0 0 100 100" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-label="${转义(名称(项.id))}${基本拆分?'基本拆分图解':'取码图解'}">${项.paths.map((径,i)=>`<path data-stroke="${i}" d="${转义(径)}" stroke="${色表.get(i)||'#a4aab3'}"/>`).join('')}</svg></div>`;}
 function 根标签(根,i){const 色=拆分颜色[i%拆分颜色.length],id=根.名称.startsWith('字形-')?根.名称.slice(3):'',链接=部件索引.has(id);const 内容=`<span class="root-number" style="color:${色}">${i+1}</span>${图标(根.名称,色)}`;return `<${链接?`a href="#components/${id}"`:'span'} class="basic-root" data-strokes="${根.笔画.join(',')}" title="第${i+1}根 · ${转义(根.名称)} · 笔序 ${根.笔画.map(笔=>笔+1).join('、')}">${内容}</${链接?'a':'span'}>`;}
 function 部件卡片(项){const 名=转义(名称(项.id));return `<article class="card component" data-id="${项.id}"><div class="card-head"><h2 title="${名}">${项.minimal.length?`<button type="button" class="word-link" data-character="${项.id}" title="看这个字的取码">${名}</button>`:名}</h2><span class="glyph-id">${项.id}</span></div><div class="component-body">${图解(项,true)}<div class="basic-roots" aria-label="完整基本拆分">${项.完整拆分.map(根标签).join('')}</div></div></article>`;}
-function 字卡片(项){
- const 状=状态.characters;
- const 行集=项.行.filter(行=>(项.minimal.length?项.minimal.includes(行.字):true)&&(!状.重码||行.重码同组.length));
- const 行=行集.map(行=>`<div class="code-row"><div class="pronunciation"><span>${转义([行.字,行.拼音].filter(Boolean).join(' · '))}</span><span class="code">${转义(行.编码)}</span>${行.重码同组.length?`<span class="duplicate">同码：${转义(行.重码同组.filter(字=>字!==行.字).join('、'))}</span>`:''}</div><div class="elements">${行.元素.map(素=>`<span class="element" style="color:${颜色[素.colorRole]||'#526077'}"><small>${转义(素.label)}</small>${素.colorRole==='initial'?转义(素.name):图标(素.name,颜色[素.colorRole]||'#526077')}<b>${转义(素.key)}</b></span>`).join('')}</div></div>`).join('');
+function 字卡片(项,成员){
+ const 行集=成员?项.行.filter(行=>行.字===成员.字&&行.编码===成员.编码):项.行.filter(行=>!项.minimal.length||项.minimal.includes(行.字));
+ const 行=行集.map(行=>{
+  const 读音=成员?行.拼音:[行.字,行.拼音].filter(Boolean).join(' · ');
+  const 编码=成员?'':`<span class="code">${转义(行.编码)}</span>`;
+  const 同码=!成员&&行.重码同组.length?`<span class="duplicate">同码：${转义(行.重码同组.filter(字=>字!==行.字).join('、'))}</span>`:'';
+  const 元素=行.元素.map(素=>{
+   const 色=颜色[素.colorRole]||'#526077';
+   const 形=素.colorRole==='initial'?转义(素.name):图标(素.name,色);
+   return `<span class="element" style="color:${色}"><small>${转义(素.label)}</small>${形}<b>${转义(素.key)}</b></span>`;
+  }).join('');
+  return `<div class="code-row"><div class="pronunciation"><span>${转义(读音)}</span>${编码}${同码}</div><div class="elements">${元素}</div></div>`;
+ }).join('');
  const 分部=项.类别==='部件'?`<a href="#components/${项.id}">看基本拆分 →</a>`:项.分部.map(子=>`<a class="${子.正部?'positive':''}" href="#${部件索引.has(子.id)?'components':'characters'}/${子.id}" title="字形-${子.id}">${转义(名称(子.id))}${子.正部?' · 正部':''}</a>`).join('');
- return `<article class="card character" data-id="${项.id}"><div class="card-head"><h2>${转义(名称(项.id))}</h2><span class="tag">${项.minimal.length?`${项.类别}字`:'分部取码'}</span><span class="glyph-id">${项.id}</span></div>${图解(项,false)}${行}<div class="parts"><span class="view-label">${项.类别==='部件'?'':'分部'}</span>${分部}</div></article>`;
+ const 标题=成员?`<h3>${转义(成员.字)}</h3>`:`<h2>${转义(名称(项.id))}</h2>`;
+ return `<article class="card character" data-id="${项.id}"><div class="card-head">${标题}<span class="tag">${项.minimal.length?`${项.类别}字`:'分部取码'}</span><span class="glyph-id">${项.id}</span></div>${图解(项,false)}${行}<div class="parts"><span class="view-label">${项.类别==='部件'?'':'分部'}</span>${分部}</div></article>`;
 }
-const 查询=document.getElementById('query'),类型=document.getElementById('kind'),重码=document.getElementById('collisions'),隐藏平凡=document.getElementById('hide-trivial'),卡片区=document.getElementById('cards');
-const 状态={characters:{词:'',页:0,重码:false,类型:'all',定位:''},components:{词:'',页:0,隐藏平凡:true}};
+const 形码差异=组=>组.差异位置.filter(位置=>位置>1);
+const 位置说明=位置=>位置.length?`第 ${位置.join('、')} 位元素不同`:'第 2–4 位元素一样';
+function 重码卡片(组){
+ const 卡片=组.成员.map(成员=>字卡片(索引.get(成员.id),{字:成员.字,编码:组.编码})).join('');
+ const 列数=Math.min(组.成员.length,4);
+ return `<section class="collision-group" style="--columns:${列数}"><div class="collision-head"><h2 class="code">${转义(组.编码)}</h2><span class="collision-detail">${组.成员.length} 字 · ${位置说明(形码差异(组))}</span></div><div class="grid collision-members">${卡片}</div></section>`;
+}
+const 查询=document.getElementById('query'),类型=document.getElementById('kind'),重码=document.getElementById('collisions'),差异=document.getElementById('collision-difference'),隐藏平凡=document.getElementById('hide-trivial'),卡片区=document.getElementById('cards');
+const 差异选项=['2','3','4','23','24','34','234'];
+for(const 值 of 差异选项)差异.add(new Option(位置说明([...值]),值));
+const 状态={characters:{词:'',页:0,重码:false,差异:'all',类型:'all',定位:''},components:{词:'',隐藏平凡:true}};
 let 当前='characters';
-const 搜索=new Map(数据.字形.map(项=>[项.id,[项.id,项.名称,...项.别名,...项.完整拆分.map(根=>根.名称),...项.roots.map(根=>根.name),...项.行.map(行=>行.编码)].join(' ').toLowerCase()]));
+const 搜索=new Map(数据.字形.map(项=>{
+ const 字形=[项.id,项.名称,...项.别名,...项.完整拆分.map(根=>根.名称),...项.roots.map(根=>根.name)].join(' ').toLowerCase();
+ return [项.id,{字形,全部:[字形,...项.行.map(行=>行.编码)].join(' ').toLowerCase()}];
+}));
+function 笔顺正则(词){
+ if(/^字形-/i.test(词)||部件索引.has(词.toLowerCase()))return;
+ const 定界=词.startsWith('/');
+ if(定界&&(词.length<2||!词.endsWith('/')))return null;
+ if(!定界&&!/^[1-5]+$/.test(词)&&!/[\\^$.*+?()[\]{}|]/.test(词))return;
+ try{return new RegExp(定界?词.slice(1,-1):词);}catch{return null;}
+}
 function 绘制(){
- const 基本=当前==='components',状=状态[当前],词=状.词.trim().toLowerCase().replace(/^字形-/,'');
- const 候选=基本?[...部件索引.values()]:数据.字形.filter(项=>项.minimal.length||项.id===状.定位);
- const 结果=候选.filter(项=>(!基本||!状.隐藏平凡||项.完整拆分.length>1)&&(基本||状.类型==='all'||项.类别===状.类型)&&(基本||!状.重码||项.行.some(行=>项.minimal.includes(行.字)&&行.重码同组.length))&&(!词||搜索.get(项.id).includes(词)));
- const 每页=基本?60:24,页数=Math.max(1,Math.ceil(结果.length/每页));
- 状.页=Math.min(状.页,页数-1);
+ const 基本=当前==='components',状=状态[当前],原词=状.词.trim();
+ const 词=原词.toLowerCase().replace(/^字形-/,'');
+ const 笔顺筛选=基本?笔顺正则(原词):undefined;
+ const 按组=!基本&&状.重码;
+ const 分页=!基本&&!按组;
+ const 匹配字形=项=>搜索.get(项.id)[按组?'字形':'全部'].includes(词);
+ const 匹配类型=项=>状.类型==='all'||项.类别===状.类型;
+ let 结果;
+ if(按组){
+  结果=数据.重码组.filter(组=>
+   (状.差异==='all'||形码差异(组).join('')===状.差异)&&
+   组.成员.some(({id})=>匹配类型(索引.get(id))&&(组.编码.includes(词)||匹配字形(索引.get(id)))));
+ }else if(基本){
+  结果=[...部件索引.values()].filter(项=>(!状.隐藏平凡||项.完整拆分.length>1)&&
+   (笔顺筛选===undefined?匹配字形(项):笔顺筛选!==null&&项.笔顺!==undefined&&笔顺筛选.test(项.笔顺)));
+ }else{
+  结果=数据.字形.filter(项=>(项.minimal.length||项.id===状.定位)&&匹配类型(项)&&匹配字形(项));
+ }
+ const 每页=24,页数=Math.max(1,Math.ceil(结果.length/每页));
+ if(分页)状.页=Math.min(状.页,页数-1);
+ const 可见=分页?结果.slice(状.页*每页,(状.页+1)*每页):结果;
  查询.value=状.词;
- 查询.placeholder=基本?'搜索部件、ID 或拆分字根':'搜索字、字形 ID 或编码';
+ 查询.placeholder=基本?'搜索部件、ID、字根或笔顺正则':'搜索字、字形 ID 或编码';
+ 查询.setAttribute('aria-invalid',String(笔顺筛选===null));
  类型.hidden=基本;
  document.getElementById('collision-control').hidden=基本;
+ document.getElementById('collision-filter').hidden=!按组;
  document.getElementById('trivial-control').hidden=!基本;
  隐藏平凡.checked=状态.components.隐藏平凡;
  类型.value=状态.characters.类型;
  重码.checked=状态.characters.重码;
- 卡片区.className=`grid ${基本?'components-grid':'characters-grid'}`;
- 卡片区.innerHTML=结果.slice(状.页*每页,(状.页+1)*每页).map(基本?部件卡片:字卡片).join('')||`<div class="empty">没有符合条件的${基本?'部件':'字'}</div>`;
- document.getElementById('count').textContent=`${结果.length} 个${基本?'部件':'字'}`;
- document.getElementById('hint').textContent=基本?'按首笔顺序显示全部基本根；数字为根序号，悬停可高亮笔画。':'显示字的实际取码；重码按 minimal 字集去重的字—声母全码统计。';
+ 差异.value=状态.characters.差异;
+ 卡片区.className=按组?'collision-groups':`grid ${基本?'components-grid':'characters-grid'}`;
+ const 单位=按组?'重码组':基本?'部件':'字';
+ 卡片区.innerHTML=可见.map(项=>按组?重码卡片(项):基本?部件卡片(项):字卡片(项)).join('')||`<div class="empty">没有符合条件的${单位}</div>`;
+ document.getElementById('count').textContent=`${结果.length} ${按组?'组':基本?'个部件':'个字'}`;
+ document.getElementById('hint').textContent=按组?'忽略第 1 位声母。第 2–4 位只比较字根间的归并，共用声母锚点仍分别比较。':基本?
+  (笔顺筛选===null?'笔顺正则无效，请检查括号或斜杠是否成对。':'笔顺正则示例：^1234$。1 横、2 竖、3 撇、4 点、5 折。'):
+  '显示字的实际取码；重码按 minimal 字集去重的字—声母全码统计。';
  document.getElementById('summary').textContent=基本?`${数据.统计.部件数} 个部件 · 完整基本拆分`:`${数据.统计.minimal字数} 个 minimal 字 · ${数据.指标.重码} 选重 · ${数据.统计.重码组数} 组重码`;
  document.getElementById('view').setAttribute('aria-labelledby',`${当前}-tab`);
  document.querySelectorAll('[data-mode]').forEach(钮=>{const 选中=钮.dataset.mode===当前;钮.setAttribute('aria-selected',String(选中));钮.tabIndex=选中?0:-1;});
- document.querySelectorAll('.page').forEach(格=>{格.textContent=`${状.页+1} / ${页数}`;});
- document.querySelectorAll('[data-page]').forEach(钮=>{钮.disabled=Number(钮.dataset.page)<0?状.页===0:状.页===页数-1;});
+ document.querySelectorAll('.pager').forEach(栏=>{栏.hidden=!分页;});
+ if(分页){
+  document.querySelectorAll('.page').forEach(格=>{格.textContent=`${状.页+1} / ${页数}`;});
+  document.querySelectorAll('[data-page]').forEach(钮=>{钮.disabled=Number(钮.dataset.page)<0?状.页===0:状.页===页数-1;});
+ }
 }
-查询.addEventListener('input',()=>{状态[当前].词=查询.value;状态[当前].页=0;if(当前==='characters')状态.characters.定位='';绘制();});
+查询.addEventListener('input',()=>{状态[当前].词=查询.value;if(当前==='characters'){状态.characters.页=0;状态.characters.定位='';}绘制();});
 类型.addEventListener('change',()=>{状态.characters.类型=类型.value;状态.characters.页=0;绘制();});
 重码.addEventListener('change',()=>{状态.characters.重码=重码.checked;状态.characters.页=0;绘制();});
-隐藏平凡.addEventListener('change',()=>{状态.components.隐藏平凡=隐藏平凡.checked;状态.components.页=0;绘制();});
+差异.addEventListener('change',()=>{状态.characters.差异=差异.value;状态.characters.页=0;绘制();});
+隐藏平凡.addEventListener('change',()=>{状态.components.隐藏平凡=隐藏平凡.checked;绘制();});
 document.querySelectorAll('[data-mode]').forEach(钮=>{
  钮.addEventListener('click',()=>{location.hash=钮.dataset.mode;});
  钮.addEventListener('keydown',事=>{if(!['ArrowLeft','ArrowRight'].includes(事.key))return;事.preventDefault();const 下个=当前==='characters'?'components':'characters';location.hash=下个;document.getElementById(`${下个}-tab`).focus();});
 });
-document.querySelectorAll('[data-page]').forEach(钮=>{钮.addEventListener('click',()=>{状态[当前].页+=Number(钮.dataset.page);绘制();document.querySelector('.controls').scrollIntoView({block:'start'});});});
+document.querySelectorAll('[data-page]').forEach(钮=>{钮.addEventListener('click',()=>{状态.characters.页+=Number(钮.dataset.page);绘制();document.querySelector('.controls').scrollIntoView({block:'start'});});});
 function 跳转(){
  const 片段=decodeURIComponent(location.hash.slice(1)).split('/');
  let 模式=片段[0],id=片段[1];
@@ -140,9 +205,9 @@ function 跳转(){
  当前=模式;
  if(id&&索引.has(id)){
   if(当前==='components'&&!部件索引.has(id))当前='characters';
-  状态[当前].词=id;状态[当前].页=0;
+  状态[当前].词=id;
   if(当前==='components'&&索引.get(id).完整拆分.length===1)状态.components.隐藏平凡=false;
-  if(当前==='characters'){状态.characters.定位=id;状态.characters.重码=false;状态.characters.类型='all';}
+  if(当前==='characters'){状态.characters.页=0;状态.characters.定位=id;状态.characters.重码=false;状态.characters.类型='all';}
  }
  绘制();
 }
