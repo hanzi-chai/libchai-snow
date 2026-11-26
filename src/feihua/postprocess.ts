@@ -26,7 +26,7 @@ import {
 	读取配置,
 	部件,
 } from "hanzi-chai";
-import { 确保存在, 笔形签名, type 飞花输入 } from "./prepare.ts";
+import { 查重排, 确保存在, 笔形签名, 重排特征, type 飞花输入 } from "./prepare.ts";
 import { 生成基本拆分分页图 } from "./report-pdf.ts";
 import { type 报告, type 报告字形, 比较笔画顺序, 生成报告 } from "./report.ts";
 
@@ -390,20 +390,20 @@ function 首部件(节点: 节点): 节点 {
 }
 const 根图 = new Map<string, string[]>();
 const 笔画名 = ["横", "竖", "撇", "点", "折"];
-function 根元素(根: 字根出现, colorIndex: number, colorRole: 配色角色) {
-	let paths: string[] | undefined;
-	if (根.名称.startsWith("字形-")) {
-		paths = 根图.get(根.名称);
-		if (paths === undefined) {
-			paths = 生成笔画路径(
-				确保存在(
-					显示字库.获取字形(Number.parseInt(根.名称.slice(3), 16)),
-					"缺少显示字根",
-				).图形盒子.获取笔画列表(),
-			);
-			根图.set(根.名称, paths);
-		}
+function 取显示根图(名称: string) {
+	let paths = 根图.get(名称);
+	if (paths === undefined) {
+		const 形 = 确保存在(
+			显示字库.获取字形(Number.parseInt(名称.slice(3), 16)),
+			`缺少显示字根：${名称}`,
+		);
+		paths = 生成笔画路径(形.图形盒子.获取笔画列表());
+		根图.set(名称, paths);
 	}
+	return paths;
+}
+function 根元素(根: 字根出现, colorIndex: number, colorRole: 配色角色) {
+	const paths = 根.名称.startsWith("字形-") ? 取显示根图(根.名称) : undefined;
 	return {
 		label: {
 			initial: "声母",
@@ -736,11 +736,6 @@ const 小鱼数据 = {
 	characters,
 };
 const 字根产物 = 生成字根图();
-if (
-	字根产物.基本组数 !== 指标.小集合组数 ||
-	字根产物.例外组数 !== 指标.补集合例外组数
-)
-	throw Error("字根图的组数与优化指标不一致");
 const 拆分页图 = resolve(编码目录, "component-splits");
 writeFileSync(`${拆分页图}.svg`, 生成基本拆分分页图(报告数据, 部件排序键));
 const 产物: Record<string, string | Buffer> = {
@@ -828,8 +823,46 @@ function 生成字根图() {
 				})[字] ?? 字,
 		);
 
+	// 士、囗、雨、竹即使没有直接取码，也在图中显示。
+	const 白名单 = new Set(["字形-0020f", "字形-00259", "字形-0070c", "字形-04414"]);
+	const 展示字根 = new Set(白名单);
+	for (const 字 of Object.values(characters)) {
+		for (const 根 of 字.roots) 展示字根.add(根.name);
+	}
+
+	const 同笔符号 = new Map((输入.同笔主根 ?? []).map((名, i) => [名, ["２", "３", "４"][i]]));
+	for (const 名 of 展示字根) {
+		if (同笔符号.has(取归并终点(名).名称)) 展示字根.delete(名);
+	}
+	const 笔画顺位 = new Map(Object.keys(合并分类器()).map((笔, i) => [笔, i]));
+	const 小集合根 = [...展示字根]
+		.filter((名) => 名.startsWith("字形-") && 键序[0].toLowerCase().includes(取键(名)))
+		.map((id) => {
+			const 件 = 取形(Number.parseInt(id.slice(3), 16));
+			if (!是部件(件)) throw Error(`小集合字根应为部件：${id}`);
+			const 笔画名称 = 件.笔画列表.map((笔) => 笔.feature);
+			return { id, 笔画名称, 特征: 重排特征(件), 签名: 全形签名(件) };
+		})
+		.sort((甲, 乙) => 比较笔画顺序(甲, 乙, 笔画顺位));
+	const 同类根 = new Map<string, typeof 小集合根>();
+	for (const 根 of 小集合根) {
+		const 已见 = 同类根.get(根.特征.分组) ?? [];
+		const 在前 = 已见.find((前) =>
+			前.笔画名称.some((笔, i) => 笔 !== 根.笔画名称[i]) &&
+			查重排(根.特征, 前.特征, 前.签名),
+		);
+		if (在前 && !白名单.has(根.id)) {
+			展示字根.delete(根.id);
+			console.log(`字根图隐藏 ${根.id}，重排同形的 ${在前.id} 笔顺在前`);
+		} else {
+			已见.push(根);
+			同类根.set(根.特征.分组, 已见);
+		}
+	}
+
 	const 键笔画 = new Map<string, string[]>();
 	for (const [位, 符号] of 笔画.entries()) {
+		if (!展示字根.has(String(位 + 1))) continue;
 		const 键 = 取键(String(位 + 1));
 		const 符号组 = 键笔画.get(键) ?? [];
 		符号组.push(符号);
@@ -861,7 +894,27 @@ function 生成字根图() {
 		分组.set(终点.名称, 组);
 	}
 	if (!分组.size) throw Error("配置中没有启用的字形字根");
-	for (const 组 of 分组.values()) {
+	// Rust 的预算按所有启用组计数，先核对，再筛选图中实际使用的成员。
+	const 启用组 = [...分组.values()];
+	if (
+		启用组.filter((组) => 键序[0].toLowerCase().includes(组.键)).length !== 指标.小集合组数 ||
+		启用组.filter((组) => 组.无理).length !== 指标.补集合例外组数
+	)
+		throw Error("启用字根的组数与优化指标不一致");
+	const 同笔图例 = new Map<string, string[]>();
+	for (const 组 of 启用组) {
+		const 符号 = 同笔符号.get(组.终点);
+		if (符号) {
+			同笔图例.set(符号, [组.终点, ...组.字根.filter((名) => 名 !== 组.终点)]);
+			组.字根 = [符号];
+			键笔画.set(组.键, [...(键笔画.get(组.键) ?? []), 符号]);
+			continue;
+		}
+		组.字根 = 组.字根.filter((名) => 展示字根.has(名));
+		if (!组.字根.length) {
+			分组.delete(组.终点);
+			continue;
+		}
 		// 主根优先，其余附形按配置声明顺序紧随。
 		组.字根.sort((甲, 乙) => Number(乙 === 组.终点) - Number(甲 === 组.终点));
 	}
@@ -873,6 +926,8 @@ function 生成字根图() {
 	const 格宽 = (宽 - 边距 * 2 - 间距 * 7) / 8;
 	const 字号 = 26,
 		格距 = 32,
+		正文左距 = 12 + (格距 - 字号) / 2,
+		正文顶距 = 49 + (格距 - 字号) / 2,
 		内容宽 = 格宽 - 24;
 	const 每行根数 = Math.floor(内容宽 / 格距);
 	type 排版组 = 根组 & { 起格: number };
@@ -906,9 +961,9 @@ function 生成字根图() {
 		if (!布局) throw Error(`缺少键布局：${键}`);
 		return 布局;
 	}
-	const 行高 = 键序.map((行, 序) =>
+	const 行高 = 键序.map((行) =>
 		Math.max(
-			序 === 3 ? 240 : 156,
+			156,
 			...[...行.toLowerCase()].map((键) => 取布局(键).高 + 66),
 		),
 	);
@@ -943,21 +998,25 @@ function 生成字根图() {
 			`<rect x="${横}" y="${纵}" width="${格宽}" height="${高}" rx="${圆角}" fill="${填色}" stroke="${边色}"/>`,
 		);
 	}
-	// 标题与字根共用字库笔画，避免标题字形随系统字体变化。
-	片段.push('<g data-heading="冰雪飞花" aria-label="冰雪飞花">');
-	for (const [序, 字] of [..."冰雪飞花"].entries()) {
-		const 如字符 = 字符.从码位创建(字.codePointAt(0) ?? 0);
-		if (!如字符.ok) throw 如字符.error;
-		const 形 = 字库.查询字符的字形(如字符.value)?.[0];
-		if (!形) throw Error(`字库缺少标题字：${字}`);
-		片段.push(
-			`<svg data-heading-char="${字}" x="${边距 + 序 * 48}" y="30" width="48" height="48" viewBox="0 0 100 100"><g fill="none" stroke="#17364a" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">${生成笔画路径(
-				形.图形盒子.获取笔画列表(),
-			)
-				.map((径) => `<path d="${逃逸(径)}"/>`)
-				.join("")}</g></svg>`,
-		);
+	function 字形文字(横: number, 顶: number, 内容: string, 大小: number, 色: string, 字距 = 大小) {
+		片段.push(`<g aria-label="${逃逸(内容)}" fill="none" stroke="${色}" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">`);
+		for (const [序, 字] of [...内容].entries()) {
+			const 单笔位 = 笔画.indexOf(字);
+			let 路径;
+			if (单笔位 >= 0) {
+				路径 = 单笔图[单笔位][1];
+			} else {
+				const 如字符 = 字符.从码位创建(字.codePointAt(0)!);
+				if (!如字符.ok) throw 如字符.error;
+				const 形 = 确保存在(显示字库.查询字符的字形(如字符.value)?.[0], `字库缺少图中文字：${字}`);
+				路径 = 生成笔画路径(形.图形盒子.获取笔画列表());
+			}
+			片段.push(`<svg x="${横 + 序 * 字距}" y="${顶}" width="${大小}" height="${大小}" viewBox="0 0 100 100">${路径.map((径) => `<path d="${逃逸(径)}"/>`).join("")}</svg>`);
+		}
+		片段.push("</g>");
 	}
+	片段.push('<g data-heading="冰雪飞花">');
+	字形文字(边距, 30, "冰雪飞花", 48, "#17364a");
 	片段.push("</g>");
 	矩形(边距 + 222, 45, 66, 29, "#e5f4f0", "#b8dbd1", 14);
 	文本(
@@ -975,22 +1034,10 @@ function 生成字根图() {
 		17,
 		"#617380",
 	);
-	文本(
-		宽 - 边距,
-		75,
-		"字根图",
-		20,
-		"#617380",
-		'text-anchor="end" letter-spacing="4"',
-	);
-	文本(
-		宽 - 边距,
-		111,
-		"zh / ch / sh → Z / C / S　　零声母 → R",
-		16,
-		"#617380",
-		'text-anchor="end"',
-	);
+	for (const [声, 标记] of [["z", "zh"], ["c", "ch"], ["s", "sh"], ["0", "零声母"]]) {
+		const 键 = 取键(`声-${声}`);
+		键笔画.set(键, [...(键笔画.get(键) ?? []), 标记]);
+	}
 	let 纵 = 146;
 	for (const [行号, 行] of 键序.entries()) {
 		const 高 = 行高[行号];
@@ -1009,30 +1056,30 @@ function 生成字根图() {
 				'font-family="Arial, sans-serif" font-weight="700"',
 			);
 			const 笔画标记 = 键笔画.get(键);
-			if (笔画标记)
-				文本(
-					横 + 格宽 - 15,
-					纵 + 32,
-					笔画标记.join(""),
-					27,
-					色.字,
-					'text-anchor="end"',
-				);
+			if (笔画标记) {
+				const 大小 = 笔画标记.length > 1 ? 18 : 27;
+				let 右端 = 横 + 格宽 - 15;
+				for (const 标记 of [...笔画标记].reverse()) {
+					if (笔画.includes(标记) || 标记 === "零声母") {
+						字形文字(右端 - 标记.length * 大小, 纵 + 34 - 大小, 标记, 大小, 色.字);
+					} else {
+						文本(右端, 纵 + 32, 标记, 大小, 色.字, 'text-anchor="end"');
+					}
+					右端 -= 标记.length * 大小 + 8;
+				}
+			}
 			for (const 组 of 取布局(键).组列表) {
 				片段.push(
 					`<g data-group="${逃逸(组.终点)}" data-irrational="${组.无理}"><title>${逃逸(组.字根.join("、"))}</title>`,
 				);
 				for (const [序, 名称] of 组.字根.entries()) {
-					const 形 = 字库.获取字形(parseInt(名称.slice(3), 16));
-					if (!形) throw Error(`字库缺少字根：${名称}`);
+					const 路径 = 取显示根图(名称);
 					const 格号 = 组.起格 + 序;
-					const 字横 = 横 + 12 + (格号 % 每行根数) * 格距 + (格距 - 字号) / 2;
+					const 字横 = 横 + 正文左距 + (格号 % 每行根数) * 格距;
 					const 字纵 =
-						纵 + 49 + Math.floor(格号 / 每行根数) * 格距 + (格距 - 字号) / 2;
+						纵 + 正文顶距 + Math.floor(格号 / 每行根数) * 格距;
 					片段.push(
-						`<svg data-root="${名称}" x="${字横}" y="${字纵}" width="${字号}" height="${字号}" viewBox="0 0 100 100"><g fill="none" stroke="${组.无理 ? 配色.无理 : 色.字}" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">${生成笔画路径(
-							形.图形盒子.获取笔画列表(),
-						)
+						`<svg data-root="${名称}" x="${字横}" y="${字纵}" width="${字号}" height="${字号}" viewBox="0 0 100 100"><g fill="none" stroke="${组.无理 ? 配色.无理 : 色.字}" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">${路径
 							.map((径) => `<path d="${逃逸(径)}"/>`)
 							.join("")}</g></svg>`,
 					);
@@ -1043,41 +1090,23 @@ function 生成字根图() {
 		}
 		if (行号 === 3) {
 			const 规则 = [
-				{
-					标题: "部件字",
-					行: [
-						"声母 ＋ 前三个基本根",
-						"",
-						"按笔顺取根，不足取全。",
-						"整字为基本根时，",
-						"可选 AB／ABB／ABBB。",
-					],
-				},
-				{
-					标题: "复合体字",
-					行: [
-						"声母 ＋ 正根 ＋ 余根",
-						"",
-						"正部取一根；",
-						"余部最多取两个基本根。",
-						"依方案规则分部，",
-						"指定意符优先。",
-					],
-				},
+				{ 标题: "部件字", 行: ["声母", "字根"], 次数: 3 },
+				{ 标题: "复合体字", 行: ["声母", "正根", "余根"], 次数: 2 },
 			];
-			for (const [序, 规则格] of 规则.entries()) {
+			for (const [序, { 标题, 行, 次数 }] of 规则.entries()) {
 				const 横 = 边距 + (6 + 序) * (格宽 + 间距);
+				片段.push(`<g data-rule="${标题}">`);
 				矩形(横, 纵, 格宽, 高, 配色.灰.底, 配色.灰.边);
-				文本(
-					横 + 15,
-					纵 + 33,
-					规则格.标题,
-					23,
-					配色.灰.字,
-					'font-weight="700"',
-				);
-				for (const [位, 行] of 规则格.行.entries())
-					文本(横 + 15, 纵 + 68 + 位 * 24, 行, 14.5);
+				// 键名字面中心在基线以上约 9.75；标题和正文共用同一字格。
+				const 标题顶 = 纵 + 33 - 9.75 - 字号 / 2;
+				字形文字(横 + 正文左距, 标题顶, 标题, 字号, 配色.灰.字, 格距);
+				for (const [位, 词] of 行.entries()) {
+					const 顶 = 纵 + 正文顶距 + 位 * 格距;
+					字形文字(横 + 正文左距, 顶, 词, 字号, "#23384a", 格距);
+					if (位 === 行.length - 1)
+						文本(横 + 正文左距 + 词.length * 格距, 顶 + 字号 * 0.85, `× ${次数}`, 字号);
+				}
+				片段.push("</g>");
 			}
 		}
 		纵 += 高 + 间距;
@@ -1091,6 +1120,21 @@ function 生成字根图() {
 	const 例外组数 = [...分组.values()].filter((组) => 组.无理).length;
 	const 统计文本 = `基本字根 ${统计字根(true)}・扩展字根 ${统计字根(false)}（非声母归并 ${例外组数} 组）`;
 	文本(边距, 纵 + 20, 统计文本, 15, "#617380");
+	// 与左侧统计共用页脚，按 ２、３、４ 的顺序从右边界反推各组位置。
+	let 图例右端 = 宽 - 边距;
+	for (const 符号 of [...同笔符号.values()].reverse()) {
+		const 成员 = 确保存在(同笔图例.get(符号), `缺少同笔图例：${符号}`);
+		const 起点 = 图例右端 - 28 - 成员.length * 26;
+		片段.push(`<g data-legend="${符号}" fill="none" stroke="${配色.B.字}" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round">`);
+		文本(起点, 纵 + 21, 符号, 22, 配色.B.字, 'stroke="none"');
+		for (const [i, 名] of 成员.entries()) {
+			const 路径 = 取显示根图(名).map((径) => `<path d="${逃逸(径)}"/>`).join("");
+			片段.push(`<svg data-legend-root="${名}" x="${起点 + 28 + i * 26}" y="${纵 + 1}" width="24" height="24" viewBox="0 0 100 100">${路径}</svg>`);
+		}
+		片段.push("</g>");
+		图例右端 = 起点 - 24;
+	}
+
 	const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 ${宽} ${页高}" role="img" aria-labelledby="title desc">
 <title id="title">冰雪飞花 beta 字根图</title><desc id="desc">键序 AOEIUV;/、BPMFDTNL、GKHWJQXY、ZCSR,.。归并字根同组排列，右下两格为取码规则。</desc>
 <rect width="${宽}" height="${页高}" fill="#ffffff"/>
@@ -1100,9 +1144,5 @@ function 生成字根图() {
 		svg: SVG,
 		png: 转换SVG(前缀, "png"),
 		pdf: 转换SVG(前缀, "pdf"),
-		基本组数: [...分组.values()].filter((组) =>
-			键序[0].toLowerCase().includes(组.键),
-		).length,
-		例外组数,
 	};
 }

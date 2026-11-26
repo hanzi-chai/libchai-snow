@@ -39,6 +39,7 @@ fn 是小集合(键: u8) -> bool {
 
 #[derive(Deserialize)]
 struct 输入 {
+    同笔主根: Option<[String; 3]>,
     版本: u32,
     初始拆分: Vec<usize>,
     局部约束: Option<Vec<Vec<Vec<usize>>>>,
@@ -268,6 +269,7 @@ enum 来源 {
 struct 字数据 {
     字: char,
     声: u8,
+    同字声键: u32, // 零声母落到同字已有声键时，只保留固定声母的码。
     来源: [来源; 3],
     整字: Option<usize>,
 }
@@ -349,6 +351,8 @@ struct 快照 {
 }
 
 pub struct 上下文 {
+    零声母: Option<usize>,
+    同笔主根: Option<[usize; 3]>,
     原配置: Value,
     pub 配置: 配置,
     输入校验: u64,
@@ -410,6 +414,10 @@ impl 上下文 {
                 .copied()
                 .ok_or_else(|| 报错(format!("未知字根：{名称}")))
         };
+        let 同笔主根 = match 输入.同笔主根 {
+            Some([二, 三, 四]) => Some([取根(&二)?, 取根(&三)?, 取根(&四)?]),
+            None => None,
+        };
         let mut 声母锚点: Vec<_> = 配置
             .form
             .mapping
@@ -418,10 +426,16 @@ impl 上下文 {
             .cloned()
             .collect();
         声母锚点.sort_unstable();
+        // 旧输入已把零声母映射到固定键，沿用原决策长度；新输入追加独立的声母决策。
+        let 零声空间 = 配置.form.mapping_space.as_ref().and_then(|表| 表.get("声-0"));
+        let 零声母 = 零声空间.filter(|列| !列.is_empty()).map(|_| 输入.字根.len());
         let 展开 = |安排: &配置安排| -> 结果<Vec<布局>> {
             match 安排 {
                 配置安排::Basic(键) => Ok(vec![布局::键(键号(键)?)]),
                 配置安排::Grouped { element } if element.starts_with("声-") => {
+                    if element == "声-0" && let Some(r) = 零声母 {
+                        return Ok(vec![布局::归并(r)]);
+                    }
                     检查(
                         配置
                             .form
@@ -555,6 +569,19 @@ impl 上下文 {
                 空间,
             });
         }
+        if let Some(列) = 零声空间.filter(|列| !列.is_empty()) {
+            let mut 空间 = Vec::new();
+            for 项 in 列 {
+                let 配置安排::Basic(键) = &项.value else { return Err(报错("零声母需要单键候选")); };
+                检查("bpmfdtnlgkhwjqxyzcsr".contains(键.as_str()) && 项.condition.as_ref().is_none_or(Vec::is_empty), "零声母键域无效")?;
+                let 键 = 布局::键(键号(键)?);
+                if !空间.contains(&键) { 空间.push(键); }
+            }
+            let 初始 = 配置.form.mapping.get("声-0").ok_or_else(|| 报错("缺少零声母键"))?;
+            let 初始 = 展开(初始)?;
+            初始安排.push(空间.iter().position(|键| 初始.as_slice() == [*键]).ok_or_else(|| 报错("零声母初始键不在空间内"))?);
+            根列表.push(根 { 名称: "声-0".into(), 落键: 键域::补集合, 核心: false, 空间 });
+        }
         let 归并 = 归并索引::新建(&根列表);
         let 部件索引: FxHashMap<_, _> = 输入
             .部件
@@ -683,8 +710,16 @@ impl 上下文 {
                 }
                 检查(位 >= 2, "复合体缺少余根请求")?;
             }
+            let mut 固定声键 = 0u32;
+            for 声 in 字.声母.iter().filter(|声| 声.as_str() != "0") {
+                固定声键 |= 1 << 键号(声)?;
+            }
             for 声 in &字.声母 {
-                let 声 = 键号(声)?;
+                let 声 = if 声 == "0" {
+                    let r = 零声母.ok_or_else(|| 报错("零声母缺少决策空间"))?;
+                    根字[r].push(字列表.len());
+                    0
+                } else { 键号(声)? };
                 检查(
                     !是小集合(声) && 唯一字音.insert((字符[0], 声)),
                     "声母位于 B 或字声母组合重复",
@@ -704,6 +739,7 @@ impl 上下文 {
                 字列表.push(字数据 {
                     字: 字符[0],
                     声,
+                    同字声键: 固定声键,
                     来源: 来源表,
                     整字,
                 });
@@ -741,6 +777,8 @@ impl 上下文 {
             重复,
         };
         let mut 上下文 = Self {
+            零声母,
+            同笔主根,
             原配置: 输入.配置,
             配置,
             输入校验,
@@ -860,6 +898,7 @@ impl 上下文 {
         let mut 码表 = BufWriter::new(File::create(目录.join("code.txt"))?);
         for (i, 字) in self.字.iter().enumerate() {
             let mut 码 = 状态.码[i];
+            if 码 == 0 { continue; }
             let mut 文本 = String::with_capacity(4);
             for _ in 0..4 {
                 let 键 = (码 & 31) as usize;
@@ -1037,9 +1076,13 @@ impl 上下文 {
                 let r = 可移动[随机.范围(可移动.len())];
                 工作.改安排(状态, r, 随机.范围(self.根[r].空间.len()));
             }
-            44..=53 if 可移动.len() > 1 => {
-                let a = 可移动[随机.范围(可移动.len())];
-                let b = 可移动[随机.范围(可移动.len())];
+            操作 @ 44..=53 if 可移动.len() > 1 => {
+                let (a, b) = if 操作 == 44 && let Some(根) = self.同笔主根 {
+                    let i = 随机.范围(3);
+                    (根[i], 根[(i + 1 + 随机.范围(2)) % 3])
+                } else {
+                    (可移动[随机.范围(可移动.len())], 可移动[随机.范围(可移动.len())])
+                };
                 if a != b {
                     let 甲 = self.根[a].空间[状态.决策.安排[a]];
                     let 乙 = self.根[b].空间[状态.决策.安排[b]];
@@ -1161,6 +1204,13 @@ impl 上下文 {
         }
         选中
     }
+    fn 同笔键合法(&self, 键: &[u8]) -> bool {
+        self.同笔主根.is_none_or(|根| {
+            let mut 三键 = 根.map(|r| 键[r]);
+            三键.sort_unstable();
+            三键 == [6, 7, 8] // 键表中的 v、;、/
+        })
+    }
     fn 更新键位(&self, 状态: &mut 状态, 工作: &mut 工作区) -> bool {
         for i in 0..工作.安排.len() {
             工作.标根(工作.安排[i].0);
@@ -1188,7 +1238,11 @@ impl 上下文 {
         {
             return false;
         }
+        if !self.同笔键合法(&状态.键) {
+            return false;
+        }
         for &(r, 原位置) in &工作.安排 {
+            if Some(r) == self.零声母 { continue; }
             let 空间 = &self.根[r].空间;
             if let 布局::键(键) = 空间[原位置] {
                 if 是小集合(键) {
@@ -1323,9 +1377,9 @@ impl 状态 {
             小组: 0,
             补组: 0,
         };
-        for (根, &安排) in 模型.根.iter().zip(&状态.决策.安排) {
+        for (i, (根, &安排)) in 模型.根.iter().zip(&状态.决策.安排).enumerate() {
             let 安排 = 根.空间.get(安排).ok_or_else(|| 报错("安排索引越界"))?;
-            if let 布局::键(键) = *安排 {
+            if Some(i) != 模型.零声母 && let 布局::键(键) = *安排 {
                 if 是小集合(键) {
                     状态.小组 += 1;
                 } else {
@@ -1348,6 +1402,7 @@ impl 状态 {
                     模型.根[r].名称
                 ))
             })?;
+        检查(模型.同笔键合法(&状态.键), "同笔三组必须一对一占用 v;/")?;
         for (i, 候选) in 模型.候选.iter().enumerate() {
             let 可用 = 候选.根.iter().copied().find(|&r| 是小集合(状态.键[r]));
             if !严格 {
@@ -1401,11 +1456,12 @@ impl 状态 {
         }
         for i in 0..模型.字.len() {
             let 码 = 状态.编码(模型, i);
+            状态.码.push(码);
+            if 码 == 0 { continue; }
             if 状态.计数[码 as usize] > 0 {
                 状态.重码 += 1;
             }
             状态.计数[码 as usize] += 1;
-            状态.码.push(码);
         }
         Ok(状态)
     }
@@ -1440,19 +1496,25 @@ impl 状态 {
                 来源::部件(件, 位) => self.部件码[件][位],
             })
         };
-        字.声 as u32 | ((码[0] as u32) << 5) | ((码[1] as u32) << 10) | ((码[2] as u32) << 15)
+        let 声 = if 字.声 == 0 {
+            let 键 = self.键[模型.零声母.expect("零声母决策")];
+            if 字.同字声键 & (1 << 键) != 0 { return 0; }
+            键
+        } else { 字.声 };
+        声 as u32 | ((码[0] as u32) << 5) | ((码[1] as u32) << 10) | ((码[2] as u32) << 15)
     }
     fn 换码(&mut self, i: usize, 新码: u32) {
         let 旧码 = self.码[i] as usize;
-        if self.计数[旧码] > 1 {
-            self.重码 -= 1;
+        if 旧码 != 0 {
+            if self.计数[旧码] > 1 { self.重码 -= 1; }
+            self.计数[旧码] -= 1;
         }
-        self.计数[旧码] -= 1;
+        self.码[i] = 新码;
+        if 新码 == 0 { return; }
         if self.计数[新码 as usize] > 0 {
             self.重码 += 1;
         }
         self.计数[新码 as usize] += 1;
-        self.码[i] = 新码;
     }
     fn 核验(&self, 模型: &上下文) -> 结果<()> {
         let 全量 = Self::新建(模型, self.决策.clone(), true)?;
@@ -1661,6 +1723,8 @@ mod tests {
         ];
         let 归并 = 归并索引::新建(&根);
         let mut 模型 = 上下文 {
+            零声母: None,
+            同笔主根: None,
             原配置: Value::Null,
             配置: 配置::default(),
             输入校验: 0,
@@ -1690,18 +1754,21 @@ mod tests {
                 字数据 {
                     字: '甲',
                     声: b,
+                    同字声键: 0,
                     来源: [来源::空; 3],
                     整字: Some(0),
                 },
                 字数据 {
                     字: '乙',
                     声: b,
+                    同字声键: 0,
                     来源: [来源::根(5), 来源::部件(1, 0), 来源::空],
                     整字: None,
                 },
                 字数据 {
                     字: '丙',
                     声: b,
+                    同字声键: 0,
                     来源: [来源::空; 3],
                     整字: Some(1),
                 },

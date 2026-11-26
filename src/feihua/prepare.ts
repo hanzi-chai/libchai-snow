@@ -23,7 +23,7 @@ import {
 	默认退化配置,
 } from "hanzi-chai";
 import { dump } from "js-yaml";
-import 方案, { 保留小集合, 生成声母归并 } from "./config.ts";
+import 方案, { 保留小集合, 备选形似归并, 指定核心, 生成声母归并 } from "./config.ts";
 import { 比较笔画顺序 } from "./report.ts";
 
 const 小集合 = "aoeiuv;/";
@@ -65,6 +65,7 @@ type 部件输入 = { id: number; 单元: 单元[]; 候选: 候选[]; 拆分: nu
 type 字输入 = { 字: string; 字形: number; 声母: string[] };
 export type 飞花输入 = {
 	版本: 3;
+	同笔主根?: [string, string, string];
 	局部约束: number[][][];
 	初始拆分: number[];
 	配置: 配置;
@@ -139,7 +140,7 @@ function 检查空间(方案: 配置, 取字形: (id: number) => 字形) {
 		字根.set(名, {
 			名称: 名,
 			落键,
-			核心: 笔画,
+			核心: 笔画 || 指定核心.has(名),
 			初始: 初始列表[0],
 			空间: 唯一空间.filter(
 				(项) => typeof 项 !== "string" || 键域[落键].includes(项),
@@ -159,7 +160,7 @@ function 检查空间(方案: 配置, 取字形: (id: number) => 字形) {
 				const 键 = 键盘.mapping[名];
 				if (typeof 键 !== "string" || 键.length !== 1 || !补集合.includes(键))
 					throw Error(`声母锚点必须固定在补集合：${名}`);
-				if (键盘.mapping_space?.[名]?.length)
+				if (名 !== "声-0" && 键盘.mapping_space?.[名]?.length)
 					throw Error(`声母锚点不能移动：${名}`);
 			} else if (!字根.has(名)) throw Error(`归并到未声明字根：${名}`);
 		}
@@ -453,7 +454,7 @@ function 选择初始拆分(
 	return 解;
 }
 
-function 重排特征(件: 部件) {
+export function 重排特征(件: 部件) {
 	const { 新关系矩阵, 划分, 子图关系矩阵 } = 件.拓扑;
 	const 笔名 = 件.笔画列表.map(
 		({ feature }) => 默认退化配置.feature?.[feature] ?? feature,
@@ -487,7 +488,7 @@ function 重排特征(件: 部件) {
 
 type 重排字形 = ReturnType<typeof 重排特征>;
 
-function 查重排(
+export function 查重排(
 	原: 重排字形,
 	目标: 重排字形,
 	目标签名: string,
@@ -989,13 +990,18 @@ export function 准备飞花(): 飞花输入 {
 	生成配置.data ??= {};
 	生成配置.data.glyphs ??= [];
 	for (const [键, 名] of 安全备选) {
-		表.mapping_space[名] = [{ value: [{ variable: "小集合" }], score: 0 }];
+		const 目标 = 备选形似归并.get(名);
+		const 归并 = 目标 === undefined ? [] : [{ element: 目标 }];
+		表.mapping_space[名] = [
+			{ value: [{ variable: "小集合" }], score: 0 },
+			...归并.map((value) => ({ value, score: 0 })),
+		];
 		字根.set(名, {
 			名称: 名,
 			落键: "小集合",
 			核心: false,
 			初始: null,
-			空间: [...小集合],
+			空间: [...小集合, ...归并],
 		});
 		const 形 = 自定义.get(键);
 		if (形) 生成配置.data.glyphs.push(形);
@@ -1007,12 +1013,14 @@ export function 准备飞花(): 飞花输入 {
 	const 字音 = new Map<string, Set<string>>();
 	for (const 条 of 词典) {
 		if ([...条.词].length !== 1 || 条.拼音.length !== 1) continue;
-		const 声 = 应用拼写运算(声规则, 条.拼音[0]);
+		const 音 = 条.拼音[0].trim();
+		if (!音) continue;
+		const 声 = 应用拼写运算(声规则, 音);
 		const 键 = 表.mapping[`声-${声}`];
 		if (typeof 键 !== "string" || 键.length !== 1 || !补集合.includes(键))
 			throw Error(`声母没有固定键位：${条.词} ${条.拼音[0]}`);
 		const 集 = 字音.get(条.词) ?? new Set<string>();
-		集.add(键);
+		集.add(声 === "0" ? "0" : 键);
 		字音.set(条.词, 集);
 	}
 	for (const 字 of 字列表)
@@ -1030,6 +1038,7 @@ export function 准备飞花(): 飞花输入 {
 	);
 	const 输入: 飞花输入 = {
 		版本: 3,
+		同笔主根: ["字形-00100", "字形-00200", "字形-d89fc"],
 		局部约束: 约束,
 		初始拆分: 选择初始拆分(部件输入列表, 初始键, 约束),
 		配置: 生成配置,
