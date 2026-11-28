@@ -108,14 +108,17 @@ const 字库 = 获取字库(配置);
 function 变量(项: 模式): number | undefined {
 	return typeof 项 !== "number" && "variable" in 项 ? 项.variable : undefined;
 }
+const 掰字形ID = 0xd772f;
 function 是准包围({ from, to }: 字形拼写运算): boolean {
-	if (
-		typeof from === "number" ||
-		!("references" in from) ||
-		typeof to === "number" ||
-		!("references" in to)
-	)
-		return false;
+	if (typeof to === "number" || !("references" in to)) return false;
+	if (typeof from === "number")
+		return (
+			from === 掰字形ID &&
+			to.operator === "⿴" &&
+			to.references[0] === 0x403a3 &&
+			to.references[1] === 0x0c112
+		);
+	if (!("references" in from)) return false;
 	const 前 = from.references.map(变量);
 	if (前.some((项) => 项 === undefined)) return false;
 	if (from.operator === "⿱" && to.operator === "⿵")
@@ -176,6 +179,8 @@ const 显示字库 = 获取字库({
 	...配置,
 	data: {
 		...配置.data,
+		// 兼容仍在 glyphs 中保存「掰」的准包围覆盖的旧快照。
+		glyphs: 配置.data?.glyphs?.filter(({ id }) => id !== 掰字形ID),
 		glyph_algebra: 配置.data?.glyph_algebra
 			?.filter((运算) => !是准包围(运算))
 			.map((运算) => ({ ...运算, from: 显示匹配模式(运算.from) })),

@@ -5,7 +5,7 @@ output/
 output-*
 *.txt
 *.yaml
-!src/feihua/config.yaml
+!src/feihua/*.yaml
 .DS_Store
 *.json
 *.html
